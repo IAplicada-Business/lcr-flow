@@ -23,6 +23,7 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-primary-hover: var(--primary-hover);
   --color-accent-lime: var(--accent-lime);
+  --color-accent-gold: var(--accent-gold);
   --color-deep: var(--deep);
   --color-deep-foreground: var(--deep-foreground);
   --color-secondary: var(--secondary);
@@ -78,10 +79,11 @@
   --primary: oklch(0.43 0.115 255);             /* #1e4d8b LCR blue */
   --primary-foreground: oklch(0.985 0.003 250);
   --primary-hover: oklch(0.32 0.095 256);       /* #13335c */
-  --accent-lime: oklch(0.72 0.10 250);          /* azul claro de apoio */
+  --accent-lime: oklch(0.72 0.10 250);          /* azul claro */
+  --accent-gold: oklch(0.79 0.13 80);           /* #d4a84a mustard */
 
-  --deep: oklch(0.235 0.075 258);               /* #0b2240 */
-  --deep-foreground: oklch(0.965 0.006 250);    /* off-white frio */
+  --deep: oklch(0.19 0.04 255);                 /* near-black navy, ref-style */
+  --deep-foreground: oklch(0.96 0.012 90);      /* warm cream */
 
   --secondary: oklch(0.945 0.012 250);
   --secondary-foreground: var(--foreground);
