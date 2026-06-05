@@ -1,11 +1,10 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { LcrWordmark, LcrLogo } from "@/components/brand";
+import { LcrLogo } from "@/components/brand";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/auth")({
@@ -20,10 +19,8 @@ export const Route = createFileRoute("/auth")({
 
 function AuthPage() {
   const navigate = useNavigate();
-  const [tab, setTab] = useState("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [nome, setNome] = useState("");
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
@@ -41,87 +38,92 @@ function AuthPage() {
     navigate({ to: "/app", replace: true });
   }
 
-  async function handleSignup(e: React.FormEvent) {
-    e.preventDefault();
-    setLoading(true);
-    const { error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: { emailRedirectTo: `${window.location.origin}/app`, data: { nome } },
-    });
-    setLoading(false);
-    if (error) return toast.error(error.message);
-    toast.success("Conta criada. Verifique seu email se confirmação estiver ativa.");
-    setTab("login");
-  }
-
   return (
-    <div className="min-h-screen grid lg:grid-cols-2">
-      <div className="hidden lg:flex flex-col justify-between bg-deep text-deep-foreground p-12">
-        <div className="font-display text-2xl tracking-tight">
-          <span className="text-deep-foreground">LCR</span>
-          <span className="italic text-accent-lime ml-1.5">Contábil</span>
+    <div className="min-h-screen grid lg:grid-cols-[1.1fr_1fr] bg-deep">
+      {/* Painel esquerdo — escuro, editorial */}
+      <div className="hidden lg:flex flex-col justify-between bg-deep text-deep-foreground p-14 relative overflow-hidden">
+        <div className="absolute inset-0 opacity-[0.04] pointer-events-none"
+          style={{
+            backgroundImage:
+              "radial-gradient(circle at 20% 20%, var(--color-deep-foreground) 1px, transparent 1px)",
+            backgroundSize: "32px 32px",
+          }}
+        />
+        <div className="relative font-display text-xl tracking-tight">
+          <span>LCR</span>
+          <span className="italic text-accent-gold ml-1.5">Contábil</span>
         </div>
-        <div className="max-w-lg">
-          <h2 className="font-display text-4xl leading-tight">
-            Uma plataforma central <span className="italic text-accent-lime">para a LCR</span> gerir a integração e a conciliação bancária dos clientes.
+
+        <div className="relative max-w-xl">
+          <div className="text-[0.7rem] tracking-[0.22em] uppercase text-accent-gold mb-6">
+            Plataforma interna · LCR
+          </div>
+          <h2 className="font-display text-5xl leading-[1.05] tracking-tight">
+            Steget före <span className="italic text-accent-gold">em cada</span> conciliação bancária.
           </h2>
-          <p className="mt-6 text-deep-foreground/70 text-base leading-relaxed">
-            Cobrança de documentos, lançamentos contábeis e conciliação — em um único fluxo.
+          <p className="mt-8 text-deep-foreground/65 text-base leading-relaxed max-w-md">
+            Cobrança de documentos, lançamentos contábeis e conciliação — um único fluxo para a equipe LCR servir cada cliente com precisão.
           </p>
         </div>
-        <div />
+
+        <div className="relative text-xs text-deep-foreground/40">
+          © {new Date().getFullYear()} LCR Contábil
+        </div>
       </div>
 
-      <div className="flex items-center justify-center p-8 bg-background">
-        <div className="w-full max-w-md">
-          <div className="lg:hidden flex items-center gap-3 mb-8">
-            <LcrLogo size={36} />
-            <div className="font-display text-lg">LCR Contábil</div>
+      {/* Painel direito — claro, formulário */}
+      <div className="flex items-center justify-center p-8 bg-background min-h-screen">
+        <div className="w-full max-w-sm">
+          <div className="flex flex-col items-center text-center">
+            <LcrLogo size={64} />
+            <div className="mt-6 text-[0.7rem] tracking-[0.22em] uppercase text-muted-foreground">
+              Acesso restrito
+            </div>
+            <h1 className="mt-3 font-display text-4xl text-foreground tracking-tight">
+              Bem-vindo
+            </h1>
+            <p className="mt-2 text-sm text-soft-foreground">
+              Entre com sua conta da equipe LCR.
+            </p>
           </div>
-          <h1 className="font-display text-3xl text-foreground">Bem-vindo</h1>
-          <p className="mt-1 text-sm text-soft-foreground">Acesso restrito à equipe LCR.</p>
 
-          <Tabs value={tab} onValueChange={setTab} className="mt-8">
-            <TabsList className="grid grid-cols-2 w-full">
-              <TabsTrigger value="login">Entrar</TabsTrigger>
-              <TabsTrigger value="signup">Criar conta</TabsTrigger>
-            </TabsList>
-            <TabsContent value="login">
-              <form onSubmit={handleLogin} className="space-y-4 mt-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="email">Email</Label>
-                  <Input id="email" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="password">Senha</Label>
-                  <Input id="password" type="password" required value={password} onChange={(e) => setPassword(e.target.value)} />
-                </div>
-                <Button type="submit" disabled={loading} className="w-full">{loading ? "Entrando..." : "Entrar"}</Button>
-              </form>
-            </TabsContent>
-            <TabsContent value="signup">
-              <form onSubmit={handleSignup} className="space-y-4 mt-4">
-                <div className="space-y-1.5">
-                  <Label htmlFor="nome">Nome</Label>
-                  <Input id="nome" required value={nome} onChange={(e) => setNome(e.target.value)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="email2">Email corporativo</Label>
-                  <Input id="email2" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="password2">Senha</Label>
-                  <Input id="password2" type="password" minLength={6} required value={password} onChange={(e) => setPassword(e.target.value)} />
-                </div>
-                <Button type="submit" disabled={loading} className="w-full">{loading ? "Criando..." : "Criar conta"}</Button>
-              </form>
-            </TabsContent>
-          </Tabs>
+          <form onSubmit={handleLogin} className="space-y-4 mt-10">
+            <div className="space-y-1.5">
+              <Label htmlFor="email" className="text-xs uppercase tracking-wider text-muted-foreground">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="h-11 rounded-full px-5"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="password" className="text-xs uppercase tracking-wider text-muted-foreground">Senha</Label>
+              <Input
+                id="password"
+                type="password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="h-11 rounded-full px-5"
+              />
+            </div>
+            <Button
+              type="submit"
+              variant="gold"
+              size="lg"
+              disabled={loading}
+              className="w-full mt-2"
+            >
+              {loading ? "Entrando..." : "Entrar"}
+            </Button>
+          </form>
 
-          <div className="mt-8 text-center">
-            <LcrWordmark className="text-xl inline-block" />
-          </div>
+          <p className="mt-8 text-center text-xs text-muted-foreground">
+            Contas são provisionadas internamente pela administração LCR.
+          </p>
         </div>
       </div>
     </div>
