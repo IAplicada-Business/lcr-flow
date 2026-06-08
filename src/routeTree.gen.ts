@@ -19,6 +19,7 @@ import { Route as AuthenticatedConfiguracoesRouteImport } from './routes/_authen
 import { Route as AuthenticatedConciliacaoRouteImport } from './routes/_authenticated/conciliacao'
 import { Route as AuthenticatedClientesRouteImport } from './routes/_authenticated/clientes'
 import { Route as AuthenticatedAppRouteImport } from './routes/_authenticated/app'
+import { Route as ApiPublicAdminCreateUserRouteImport } from './routes/api/public/_admin-create-user'
 import { Route as AuthenticatedConciliacaoEmpresaIdRouteImport } from './routes/_authenticated/conciliacao.$empresaId'
 import { Route as AuthenticatedClientesIdRouteImport } from './routes/_authenticated/clientes.$id'
 
@@ -74,6 +75,12 @@ const AuthenticatedAppRoute = AuthenticatedAppRouteImport.update({
   path: '/app',
   getParentRoute: () => AuthenticatedRouteRoute,
 } as any)
+const ApiPublicAdminCreateUserRoute =
+  ApiPublicAdminCreateUserRouteImport.update({
+    id: '/api/public/_admin-create-user',
+    path: '/api/public',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AuthenticatedConciliacaoEmpresaIdRoute =
   AuthenticatedConciliacaoEmpresaIdRouteImport.update({
     id: '/$empresaId',
@@ -98,6 +105,7 @@ export interface FileRoutesByFullPath {
   '/tarefas': typeof AuthenticatedTarefasRoute
   '/clientes/$id': typeof AuthenticatedClientesIdRoute
   '/conciliacao/$empresaId': typeof AuthenticatedConciliacaoEmpresaIdRoute
+  '/api/public': typeof ApiPublicAdminCreateUserRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -111,6 +119,7 @@ export interface FileRoutesByTo {
   '/tarefas': typeof AuthenticatedTarefasRoute
   '/clientes/$id': typeof AuthenticatedClientesIdRoute
   '/conciliacao/$empresaId': typeof AuthenticatedConciliacaoEmpresaIdRoute
+  '/api/public': typeof ApiPublicAdminCreateUserRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -126,6 +135,7 @@ export interface FileRoutesById {
   '/_authenticated/tarefas': typeof AuthenticatedTarefasRoute
   '/_authenticated/clientes/$id': typeof AuthenticatedClientesIdRoute
   '/_authenticated/conciliacao/$empresaId': typeof AuthenticatedConciliacaoEmpresaIdRoute
+  '/api/public/_admin-create-user': typeof ApiPublicAdminCreateUserRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -141,6 +151,7 @@ export interface FileRouteTypes {
     | '/tarefas'
     | '/clientes/$id'
     | '/conciliacao/$empresaId'
+    | '/api/public'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -154,6 +165,7 @@ export interface FileRouteTypes {
     | '/tarefas'
     | '/clientes/$id'
     | '/conciliacao/$empresaId'
+    | '/api/public'
   id:
     | '__root__'
     | '/'
@@ -168,12 +180,14 @@ export interface FileRouteTypes {
     | '/_authenticated/tarefas'
     | '/_authenticated/clientes/$id'
     | '/_authenticated/conciliacao/$empresaId'
+    | '/api/public/_admin-create-user'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ApiPublicAdminCreateUserRoute: typeof ApiPublicAdminCreateUserRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -248,6 +262,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthenticatedAppRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
     }
+    '/api/public/_admin-create-user': {
+      id: '/api/public/_admin-create-user'
+      path: '/api/public'
+      fullPath: '/api/public'
+      preLoaderRoute: typeof ApiPublicAdminCreateUserRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/conciliacao/$empresaId': {
       id: '/_authenticated/conciliacao/$empresaId'
       path: '/$empresaId'
@@ -320,6 +341,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ApiPublicAdminCreateUserRoute: ApiPublicAdminCreateUserRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
