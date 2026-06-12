@@ -3,6 +3,7 @@ import { useSuspenseQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { PageHeader, DemoFlag } from "@/components/app-shell";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DndContext, useDraggable, useDroppable, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
 import { listTarefas, listConsultores, moverTarefa } from "@/lib/lcr.functions";
 import { TAREFA_TIPO_LABEL } from "@/lib/format";
@@ -12,6 +13,7 @@ import { toast } from "sonner";
 import { requireAcesso } from "@/lib/guard";
 
 type TarefaStatus = "now" | "doing" | "next" | "back" | "done";
+type TipoGrupo = "cobranca" | "lancamentos" | "conciliacao";
 type Tarefa = {
   id: string; tipo: string; status: string; titulo: string; prazo: string | null;
   empresa: { razao_social: string } | null; consultor: { id: string; nome: string } | null;
@@ -26,7 +28,7 @@ const COLUNAS: { key: TarefaStatus; label: string; variant: "now" | "doing" | "n
 ];
 
 // Normaliza as duas gerações de enum (antiga + spec) para os grupos/colunas.
-const TIPO_GROUP: Record<string, "cobranca" | "lancamentos" | "conciliacao"> = {
+const TIPO_GROUP: Record<string, TipoGrupo> = {
   cobranca: "cobranca", cobranca_movimento: "cobranca",
   lancamentos: "lancamentos", lancamentos_contabeis: "lancamentos",
   conciliacao: "conciliacao", conciliacao_balancete: "conciliacao",
@@ -36,7 +38,8 @@ const STATUS_COL: Record<string, TarefaStatus> = {
   aberta: "next", em_andamento: "doing", concluida: "done", bloqueada: "back",
 };
 
-const TIPOS: { key: "cobranca" | "lancamentos" | "conciliacao"; label: string }[] = [
+const ABAS: { key: "all" | TipoGrupo; label: string }[] = [
+  { key: "all", label: "Todos" },
   { key: "cobranca", label: TAREFA_TIPO_LABEL.cobranca },
   { key: "lancamentos", label: TAREFA_TIPO_LABEL.lancamentos },
   { key: "conciliacao", label: TAREFA_TIPO_LABEL.conciliacao },
@@ -60,11 +63,16 @@ function TarefasPage() {
   const { data: tarefas } = useSuspenseQuery({ queryKey: ["tarefas"], queryFn: () => listTarefas() });
   const { data: consultores } = useSuspenseQuery({ queryKey: ["consultores"], queryFn: () => listConsultores() });
   const [consultorFiltro, setConsultorFiltro] = useState("all");
+  const [tipoAba, setTipoAba] = useState<"all" | TipoGrupo>("all");
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
 
   const filtered = useMemo(
-    () => (tarefas as Tarefa[]).filter((t) => consultorFiltro === "all" || t.consultor?.id === consultorFiltro),
-    [tarefas, consultorFiltro],
+    () => (tarefas as Tarefa[]).filter((t) => {
+      if (consultorFiltro !== "all" && t.consultor?.id !== consultorFiltro) return false;
+      if (tipoAba !== "all" && TIPO_GROUP[t.tipo] !== tipoAba) return false;
+      return true;
+    }),
+    [tarefas, consultorFiltro, tipoAba],
   );
 
   async function handleDragEnd(e: DragEndEvent) {
@@ -100,19 +108,24 @@ function TarefasPage() {
         }
       />
 
+      <Tabs value={tipoAba} onValueChange={(v) => setTipoAba(v as "all" | TipoGrupo)} className="mb-5">
+        <TabsList>
+          {ABAS.map((a) => {
+            const n = (tarefas as Tarefa[]).filter((t) =>
+              (a.key === "all" || TIPO_GROUP[t.tipo] === a.key) &&
+              (consultorFiltro === "all" || t.consultor?.id === consultorFiltro),
+            ).length;
+            return <TabsTrigger key={a.key} value={a.key}>{a.label} <span className="ml-1.5 text-xs text-muted-foreground">{n}</span></TabsTrigger>;
+          })}
+        </TabsList>
+      </Tabs>
+
       <DndContext sensors={sensors} onDragEnd={handleDragEnd}>
-        <div className="space-y-8">
-          {TIPOS.map((tipo) => (
-            <section key={tipo.key}>
-              <h2 className="font-display text-xl mb-3">{tipo.label}</h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
-                {COLUNAS.map((col) => {
-                  const items = filtered.filter((t) => TIPO_GROUP[t.tipo] === tipo.key && STATUS_COL[t.status] === col.key);
-                  return <Coluna key={col.key} colKey={`${tipo.key}:${col.key}`} label={col.label} variant={col.variant} items={items} />;
-                })}
-              </div>
-            </section>
-          ))}
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+          {COLUNAS.map((col) => {
+            const items = filtered.filter((t) => STATUS_COL[t.status] === col.key);
+            return <Coluna key={col.key} colKey={`${tipoAba}:${col.key}`} label={col.label} variant={col.variant} items={items} />;
+          })}
         </div>
       </DndContext>
     </>
