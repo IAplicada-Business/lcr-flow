@@ -8,6 +8,7 @@ import { EMPRESA_STATUS_LABEL, formatCompetencia } from "@/lib/format";
 import { Building2, FileClock, BookOpen, GitCompare, AlertTriangle, ListTodo, ArrowRight } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, PieChart, Pie, Cell } from "recharts";
 import { requireAcesso } from "@/lib/guard";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/app")({
   beforeLoad: ({ context }) => requireAcesso(context.queryClient, "dashboard", "/app"),
@@ -58,25 +59,33 @@ function Dashboard() {
         description={`Ciclo de ${formatCompetencia(data.competencia)} — integração e conciliação bancária dos clientes.`}
       />
 
-      {/* KPIs */}
+      {/* KPIs — primeiro é hero (accent sólido da marca), demais neutros */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-5">
-        {stats.map((s) => {
+        {stats.map((s, i) => {
           const Icon = s.icon;
+          const hero = i === 0;
           return (
-            <Card key={s.label} className="card-interactive">
-              <CardContent className="p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{s.label}</div>
-                    <div className="mt-3 font-display text-[2.75rem] leading-none text-foreground">{s.value}</div>
-                    <div className="mt-2 text-xs text-muted-foreground">{s.hint}</div>
-                  </div>
-                  <span className="icon-chip h-11 w-11 shrink-0">
-                    <Icon className="h-5 w-5" />
-                  </span>
+            <div
+              key={s.label}
+              className={cn(
+                "rounded-xl p-5 shadow-soft transition-all duration-200 hover:-translate-y-0.5 hover:shadow-card",
+                hero ? "bg-primary text-primary-foreground" : "bg-card text-card-foreground",
+              )}
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className={cn("label-cat", hero && "text-primary-foreground/70")}>{s.label}</div>
+                  <div className="mt-3 text-[2.25rem] font-bold leading-none tracking-tight">{s.value}</div>
+                  <div className={cn("mt-2 text-xs", hero ? "text-primary-foreground/70" : "text-muted-foreground")}>{s.hint}</div>
                 </div>
-              </CardContent>
-            </Card>
+                <span className={cn(
+                  "flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl",
+                  hero ? "bg-white/15 text-primary-foreground" : "icon-chip",
+                )}>
+                  <Icon className="h-5 w-5" />
+                </span>
+              </div>
+            </div>
           );
         })}
       </div>

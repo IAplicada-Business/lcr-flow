@@ -227,15 +227,15 @@ export function PageHeader({ title, emphasis, description, actions }: { title: s
   );
 }
 
-/** Resumo consolidado no topo da tela — uma linha de mini-cards. */
+/** Resumo consolidado no topo da tela — KPI cards (padrão NutriSense). */
 export function ResumoTela({ itens }: { itens: { label: string; value: number | string; tone?: "default" | "warn" | "ok" }[] }) {
   return (
     <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
       {itens.map((it) => (
-        <div key={it.label} className="rounded-xl border border-border/70 bg-card px-4 py-3 shadow-soft">
-          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{it.label}</div>
+        <div key={it.label} className="rounded-xl bg-card px-5 py-4 shadow-soft transition-shadow duration-200 hover:shadow-card">
+          <div className="label-cat">{it.label}</div>
           <div className={cn(
-            "mt-1 font-display text-2xl leading-none",
+            "mt-1.5 text-[1.75rem] font-bold leading-none tracking-tight",
             it.tone === "warn" ? "text-destructive" : it.tone === "ok" ? "text-primary" : "text-foreground",
           )}>{it.value}</div>
         </div>
