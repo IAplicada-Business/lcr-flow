@@ -40,16 +40,15 @@ function leafAtiva(leaf: NavLeaf, pathname: string, tabAtual: string | undefined
 function NavLeafLink({ leaf, collapsed, active }: { leaf: NavLeaf; collapsed: boolean; active: boolean }) {
   const Icon = leaf.icon;
   const className = cn(
-    "group relative flex items-center rounded-lg text-sm transition-all duration-150",
-    collapsed ? "justify-center px-0 py-2.5" : "gap-3 py-2 pl-9 pr-3",
+    "group relative flex items-center rounded-[20px] text-sm transition-all duration-200 ease-out",
+    collapsed ? "justify-center px-0 py-2.5" : "gap-3 py-2.5 pl-9 pr-3",
     active
-      ? "bg-sidebar-accent text-sidebar-foreground font-medium shadow-soft"
+      ? "bg-sidebar-primary text-sidebar-primary-foreground font-semibold shadow-soft"
       : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
   );
   const inner = (
     <>
-      {active && <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-sidebar-primary" />}
-      {collapsed && <Icon className={cn("h-[18px] w-[18px] shrink-0 transition-colors", active ? "text-sidebar-primary" : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground")} />}
+      {collapsed && <Icon className={cn("h-[18px] w-[18px] shrink-0 transition-colors", active ? "" : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground")} />}
       {!collapsed && <span className="truncate">{leaf.label}</span>}
     </>
   );

@@ -5,24 +5,26 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-medium cursor-pointer transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background active:translate-y-px disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-full text-sm font-semibold tracking-[0.01em] cursor-pointer transition-all duration-200 ease-out focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-2 focus-visible:ring-offset-background active:translate-y-px disabled:pointer-events-none disabled:opacity-50 disabled:cursor-not-allowed [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
+        // CTA primário: pill accent da marca
         default: "bg-primary text-primary-foreground shadow-soft hover:bg-primary-hover hover:shadow-card hover:-translate-y-0.5",
         gold: "bg-accent-gold text-deep shadow-soft hover:brightness-95 hover:shadow-card hover:-translate-y-0.5",
         destructive: "bg-destructive text-destructive-foreground shadow-soft hover:bg-destructive/90 hover:-translate-y-0.5",
+        // secundário/outline/ghost: radius 20px (não-pill), borda mínima
         outline:
-          "border border-border bg-card shadow-soft hover:bg-accent hover:text-accent-foreground hover:border-primary/30",
-        secondary: "bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground",
-        ghost: "rounded-md hover:bg-accent hover:text-accent-foreground",
+          "rounded-[20px] border border-border bg-card shadow-soft hover:bg-accent hover:text-accent-foreground hover:border-primary/30",
+        secondary: "rounded-[20px] bg-secondary text-secondary-foreground hover:bg-accent hover:text-accent-foreground",
+        ghost: "rounded-[18px] hover:bg-accent hover:text-accent-foreground",
         link: "rounded-none text-primary underline-offset-4 hover:underline",
       },
       size: {
-        default: "h-10 px-5 py-2",
+        default: "h-11 px-6 py-2",
         sm: "h-9 px-4 text-xs",
         lg: "h-12 px-8 text-base",
-        icon: "h-10 w-10 rounded-full",
+        icon: "h-11 w-11 rounded-full",
       },
     },
     defaultVariants: {
