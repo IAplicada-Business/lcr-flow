@@ -1,10 +1,11 @@
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Building2, FileText, BookOpen, GitCompare, ListChecks, Settings, LogOut, PanelLeftClose, PanelLeftOpen, Brain, LineChart, HeartHandshake, Plug, Users, ListTree, ChevronDown, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Building2, FileText, BookOpen, GitCompare, ListChecks, Settings, LogOut, PanelLeftClose, PanelLeftOpen, Brain, LineChart, HeartHandshake, Plug, Users, ListTree, ChevronDown, Bell, type LucideIcon } from "lucide-react";
 import { LcrLogo } from "./brand";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
 import { useEffect, useState, type ReactNode } from "react";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 
 type NavLeaf = { to: string; label: string; icon: LucideIcon; acesso: string; tab?: string };
 type NavGroup = { label: string; icon: LucideIcon; itens: NavLeaf[] };
@@ -59,7 +60,65 @@ function NavLeafLink({ leaf, collapsed, active }: { leaf: NavLeaf; collapsed: bo
   return <Link to={leaf.to as "/app"} title={title} className={className}>{inner}</Link>;
 }
 
-export function AppShell({ children, userName, acessos }: { children: ReactNode; userName?: string; acessos?: string[] }) {
+// Topbar: perfil + notificações à direita; some ao rolar para baixo, volta ao subir.
+function TopBar({ userName, userRole, onSignOut }: { userName?: string; userRole?: string; onSignOut: () => void }) {
+  const [hidden, setHidden] = useState(false);
+  useEffect(() => {
+    let last = window.scrollY;
+    const onScroll = () => {
+      const y = window.scrollY;
+      if (y > last && y > 80) setHidden(true);
+      else if (y < last) setHidden(false);
+      last = y;
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+  const iniciais = (userName ?? "LCR").slice(0, 2).toUpperCase();
+  return (
+    <header
+      className={cn(
+        "sticky top-0 z-20 flex h-16 items-center justify-end gap-1 bg-background/80 px-6 backdrop-blur transition-transform duration-300 ease-out lg:px-12",
+        hidden ? "-translate-y-full" : "translate-y-0",
+      )}
+    >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className="relative flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground" aria-label="Notificações">
+            <Bell className="h-5 w-5" />
+            <span className="absolute right-2.5 top-2.5 h-2 w-2 rounded-full bg-primary" />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-72">
+          <DropdownMenuLabel>Notificações</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <div className="px-2 py-6 text-center text-sm text-muted-foreground">Sem novas notificações.</div>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className="flex items-center gap-2.5 rounded-full py-1 pl-1 pr-2.5 transition-colors hover:bg-accent">
+            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/12 text-xs font-semibold text-primary">{iniciais}</span>
+            <span className="hidden text-left sm:block">
+              <span className="block text-sm font-semibold leading-tight text-foreground">{userName ?? "Equipe LCR"}</span>
+              <span className="block text-[11px] capitalize leading-tight text-muted-foreground">{userRole ?? "Conectado"}</span>
+            </span>
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuLabel className="truncate">{userName ?? "Equipe LCR"}</DropdownMenuLabel>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={onSignOut} className="text-destructive focus:text-destructive">
+            <LogOut className="mr-2 h-4 w-4" /> Sair
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </header>
+  );
+}
+
+export function AppShell({ children, userName, userRole, acessos }: { children: ReactNode; userName?: string; userRole?: string; acessos?: string[] }) {
   const router = useRouter();
   const qc = useQueryClient();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -145,7 +204,7 @@ export function AppShell({ children, userName, acessos }: { children: ReactNode;
             </div>
           ) : (
             // expandido: grupos como dropdowns
-            <div className="space-y-1">
+            <div className="space-y-2">
               {grupos.map((g) => {
                 const aberto = openGroups[g.label] ?? true;
                 const temAtivo = g.itens.some((i) => leafAtiva(i, pathname, tabAtual));
@@ -154,13 +213,15 @@ export function AppShell({ children, userName, acessos }: { children: ReactNode;
                     <button
                       onClick={() => toggleGroup(g.label)}
                       className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-[11px] font-semibold uppercase tracking-wider transition-colors",
-                        temAtivo ? "text-sidebar-foreground" : "text-sidebar-foreground/45 hover:text-sidebar-foreground/70",
+                        "flex w-full items-center gap-2 rounded-[14px] px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider shadow-soft transition-all duration-200",
+                        temAtivo
+                          ? "bg-sidebar-primary/20 text-sidebar-foreground"
+                          : "bg-sidebar-accent/50 text-sidebar-foreground/75 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
                       )}
                       aria-expanded={aberto}
                     >
                       <span className="flex-1 text-left">{g.label}</span>
-                      <ChevronDown className={cn("h-3.5 w-3.5 transition-transform duration-200", aberto ? "" : "-rotate-90")} />
+                      <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform duration-200", aberto ? "" : "-rotate-90")} />
                     </button>
                     {aberto && (
                       <div className="mt-0.5 space-y-0.5">
@@ -206,7 +267,8 @@ export function AppShell({ children, userName, acessos }: { children: ReactNode;
         </div>
       </aside>
       <main className={cn("flex-1 transition-[margin] duration-200", collapsed ? "ml-[72px]" : "ml-64")}>
-        <div className="w-full px-6 py-8 lg:px-12 lg:py-10">{children}</div>
+        <TopBar userName={userName} userRole={userRole} onSignOut={handleSignOut} />
+        <div className="w-full px-6 pb-10 pt-2 lg:px-12">{children}</div>
       </main>
     </div>
   );

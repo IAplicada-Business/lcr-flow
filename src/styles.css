@@ -159,7 +159,7 @@
   /* Tipografia — escala/pesos NutriSense, famílias da marca */
   h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: -0.02em; line-height: 1.15; }
   h1 { letter-spacing: -0.02em; line-height: 1.1; }
-  .emphasis { font-family: var(--font-display); font-style: italic; color: var(--color-primary-hover); }
+  .emphasis { font-family: var(--font-display); color: var(--color-primary); }
   /* Label de categoria (UPPERCASE, espaçado) */
   .label-cat {
     font-size: 11px;
