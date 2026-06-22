@@ -55,8 +55,7 @@ function Dashboard() {
     <>
       <PageHeader
         title="Visão geral"
-        emphasis="para a LCR"
-        description={`Ciclo de ${formatCompetencia(data.competencia)} — integração e conciliação bancária dos clientes.`}
+        description="Integração e conciliação bancária dos clientes."
       />
 
       {/* KPIs — primeiro é hero (accent sólido da marca), demais neutros */}
