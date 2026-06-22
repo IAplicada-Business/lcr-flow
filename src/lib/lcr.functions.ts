@@ -638,17 +638,24 @@ export const listPlanoContas = createServerFn({ method: "GET" })
 export const getKnowledgeHub = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const [{ data: processos }, { data: artigos }, { data: videos }] = await Promise.all([
+    const [{ data: processos }, { data: artigos }, { data: passosRows }, { data: artProc }] = await Promise.all([
       context.supabase.from("kb_processos").select("id, codigo, nome, area, descricao, link_execucao").eq("ativo", true).order("ordem"),
       context.supabase.from("kb_articles").select("id, titulo, categoria, tags, created_at").eq("ativo", true).order("created_at", { ascending: false }).limit(10),
-      context.supabase.from("kb_videos").select("id, titulo, url, categoria, duracao_segundos, processo_id").order("created_at", { ascending: false }).limit(6),
+      context.supabase.from("kb_processo_passos").select("processo_id"),
+      context.supabase.from("kb_articles").select("processo_id").eq("ativo", true),
     ]);
+    const cont = (rows: { processo_id: number | null }[] | null) => {
+      const m = new Map<number, number>();
+      (rows ?? []).forEach((r) => { if (r.processo_id != null) m.set(r.processo_id, (m.get(r.processo_id) ?? 0) + 1); });
+      return m;
+    };
+    const passosCount = cont(passosRows);
+    const artigosCount = cont(artProc);
     const areas: Record<string, number> = {};
     (processos ?? []).forEach((p) => { areas[p.area] = (areas[p.area] ?? 0) + 1; });
     return {
-      processos: processos ?? [],
+      processos: (processos ?? []).map((p) => ({ ...p, passos: passosCount.get(p.id) ?? 0, artigos: artigosCount.get(p.id) ?? 0 })),
       artigos: artigos ?? [],
-      videos: videos ?? [],
       areas: Object.entries(areas).map(([area, total]) => ({ area, total })),
     };
   });
