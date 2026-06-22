@@ -78,7 +78,7 @@ function TopBar({ userName, userRole, onSignOut }: { userName?: string; userRole
   return (
     <header
       className={cn(
-        "sticky top-0 z-20 flex h-16 items-center justify-end gap-1 bg-background/80 px-6 backdrop-blur transition-transform duration-300 ease-out lg:px-12",
+        "sticky top-0 z-20 flex h-16 items-center justify-end gap-1 border-b border-primary/10 bg-accent/70 px-6 backdrop-blur transition-transform duration-300 ease-out lg:px-12",
         hidden ? "-translate-y-full" : "translate-y-0",
       )}
     >
