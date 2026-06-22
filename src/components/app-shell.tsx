@@ -167,7 +167,7 @@ function TopBar({ userName, userRole, userAvatar, collapsed, onToggle, onSignOut
   return (
     <header
       className={cn(
-        "sticky top-0 z-20 flex h-16 items-center justify-between gap-1 border-b border-primary/10 bg-accent/70 px-4 backdrop-blur transition-transform duration-300 ease-out lg:px-8",
+        "sticky top-0 z-20 flex h-16 items-center justify-between gap-1 border-b border-primary/15 bg-[oklch(0.89_0.04_250)]/90 px-4 backdrop-blur transition-transform duration-300 ease-out lg:px-8",
         hidden ? "-translate-y-full" : "translate-y-0",
       )}
     >
@@ -235,12 +235,8 @@ export function AppShell({ children, userName, userRole, userAvatar, acessos }: 
     .map((g) => ({ ...g, itens: acessos ? g.itens.filter((i) => acessos.includes(i.acesso)) : g.itens }))
     .filter((g) => g.itens.length > 0);
 
-  // dropdowns começam fechados; o grupo da rota atual abre automaticamente
+  // dropdowns começam e permanecem fechados até o usuário clicar
   const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-  useEffect(() => {
-    const ativo = NAV_GROUPS.find((g) => g.itens.some((i) => leafAtiva(i, pathname, tabAtual)));
-    if (ativo) setOpenGroups((p) => (p[ativo.label] ? p : { ...p, [ativo.label]: true }));
-  }, [pathname, tabAtual]);
   const toggleGroup = (label: string) => setOpenGroups((p) => ({ ...p, [label]: !p[label] }));
 
   // lê a preferência do usuário após montar (evita mismatch de hidratação)
@@ -270,9 +266,9 @@ export function AppShell({ children, userName, userRole, userAvatar, acessos }: 
           collapsed ? "-translate-x-full" : "translate-x-0",
         )}
       >
-        {/* Header — apenas a logo */}
-        <div className="flex items-center px-5 py-6">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-white/95 shadow-soft"><LcrLogo size={30} /></div>
+        {/* Header — apenas a logo, centralizada */}
+        <div className="flex items-center justify-center px-5 py-6">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/95 shadow-soft"><LcrLogo size={34} /></div>
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-3">
