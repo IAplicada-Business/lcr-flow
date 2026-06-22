@@ -674,6 +674,36 @@ export const getProcesso = createServerFn({ method: "GET" })
     return { processo, passos: passos ?? [], videos: videos ?? [], artigos: artigos ?? [] };
   });
 
+// Importa conhecimento real: cria um artigo na base (markdown colado ou de arquivo).
+export const criarArtigoConhecimento = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      titulo: z.string().min(2).max(200),
+      conteudo_markdown: z.string().min(1).max(200000),
+      categoria: z.string().max(40).optional().nullable(),
+      tags: z.array(z.string().max(40)).max(20).default([]),
+      processo_id: z.number().int().positive().optional().nullable(),
+    }).parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const { data: art, error } = await context.supabase
+      .from("kb_articles")
+      .insert({
+        titulo: data.titulo,
+        conteudo_markdown: data.conteudo_markdown,
+        categoria: data.categoria ?? null,
+        tags: data.tags,
+        processo_id: data.processo_id ?? null,
+        autor_id: context.userId,
+        ativo: true,
+      })
+      .select()
+      .single();
+    if (error) throw new Error(error.message);
+    return art;
+  });
+
 export const getConsultiveCarteira = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {

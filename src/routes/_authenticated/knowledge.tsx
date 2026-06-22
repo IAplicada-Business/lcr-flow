@@ -1,15 +1,18 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useSuspenseQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useSuspenseQuery, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useRef, useState } from "react";
 import { PageHeader, ResumoTela } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { getKnowledgeHub } from "@/lib/lcr.functions";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { getKnowledgeHub, criarArtigoConhecimento } from "@/lib/lcr.functions";
 import { requireAcesso } from "@/lib/guard";
-import { Search, ArrowRight } from "lucide-react";
+import { Search, ArrowRight, Upload, Plus, FileText } from "lucide-react";
+import { toast } from "sonner";
 
 export const Route = createFileRoute("/_authenticated/knowledge")({
   beforeLoad: ({ context }) => requireAcesso(context.queryClient, "knowledge", "/knowledge"),
@@ -19,10 +22,119 @@ export const Route = createFileRoute("/_authenticated/knowledge")({
   errorComponent: ({ error }) => <div className="p-6 text-destructive">Erro: {error.message}</div>,
 });
 
+const CATEGORIAS = [
+  { v: "procedimento", l: "Procedimento" },
+  { v: "decisao", l: "Decisão" },
+  { v: "padrao", l: "Padrão" },
+  { v: "faq", l: "FAQ" },
+];
+
+type Processo = { id: number; codigo: string; nome: string };
+
+function ImportarDialog({ processos, open, onOpenChange }: { processos: Processo[]; open: boolean; onOpenChange: (o: boolean) => void }) {
+  const qc = useQueryClient();
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [titulo, setTitulo] = useState("");
+  const [categoria, setCategoria] = useState("procedimento");
+  const [processoId, setProcessoId] = useState("none");
+  const [tags, setTags] = useState("");
+  const [conteudo, setConteudo] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  function reset() { setTitulo(""); setCategoria("procedimento"); setProcessoId("none"); setTags(""); setConteudo(""); }
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const texto = await file.text();
+    setConteudo(texto);
+    if (!titulo) setTitulo(file.name.replace(/\.(md|markdown|txt)$/i, ""));
+    if (fileRef.current) fileRef.current.value = "";
+  }
+
+  async function salvar() {
+    if (!titulo.trim() || !conteudo.trim()) { toast.error("Informe título e conteúdo."); return; }
+    setBusy(true);
+    try {
+      await criarArtigoConhecimento({ data: {
+        titulo: titulo.trim(),
+        conteudo_markdown: conteudo,
+        categoria,
+        tags: tags.split(",").map((t) => t.trim()).filter(Boolean),
+        processo_id: processoId === "none" ? null : Number(processoId),
+      } });
+      toast.success("Artigo adicionado à base.");
+      qc.invalidateQueries({ queryKey: ["knowledge-hub"] });
+      reset();
+      onOpenChange(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao salvar.");
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => { onOpenChange(o); if (!o) reset(); }}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader><DialogTitle className="font-display text-2xl">Importar conhecimento</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Título</label>
+              <Input value={titulo} onChange={(e) => setTitulo(e.target.value)} placeholder="Ex.: Procedimento de fechamento" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Categoria</label>
+              <Select value={categoria} onValueChange={setCategoria}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{CATEGORIAS.map((c) => <SelectItem key={c.v} value={c.v}>{c.l}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Processo (opcional)</label>
+              <Select value={processoId} onValueChange={setProcessoId}>
+                <SelectTrigger><SelectValue placeholder="Nenhum" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Nenhum</SelectItem>
+                  {processos.map((p) => <SelectItem key={p.id} value={String(p.id)}>{p.codigo} — {p.nome}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-sm font-medium">Tags (separadas por vírgula)</label>
+              <Input value={tags} onChange={(e) => setTags(e.target.value)} placeholder="conciliação, fechamento" />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">Conteúdo (Markdown)</label>
+              <input ref={fileRef} type="file" accept=".md,.markdown,.txt" className="hidden" onChange={onFile} />
+              <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()}>
+                <Upload className="mr-1 h-3.5 w-3.5" /> Carregar arquivo (.md/.txt)
+              </Button>
+            </div>
+            <textarea
+              value={conteudo}
+              onChange={(e) => setConteudo(e.target.value)}
+              rows={10}
+              placeholder="Cole aqui o conteúdo do documento, ou carregue um arquivo .md/.txt"
+              className="w-full resize-y rounded-lg border border-border bg-background px-3 py-2 font-mono text-sm outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
+          <Button onClick={salvar} disabled={busy}>{busy ? "Salvando…" : "Adicionar à base"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function KnowledgePage() {
   const { data } = useSuspenseQuery({ queryKey: ["knowledge-hub"], queryFn: () => getKnowledgeHub() });
   const [q, setQ] = useState("");
   const [area, setArea] = useState("all");
+  const [importOpen, setImportOpen] = useState(false);
 
   const processos = useMemo(() => data.processos.filter((p) => {
     if (area !== "all" && p.area !== area) return false;
@@ -32,7 +144,12 @@ function KnowledgePage() {
 
   return (
     <>
-      <PageHeader title="Base de" emphasis="Conhecimento" description="Processos, padrões e procedimentos da LCR. Pergunte ao Mestre no assistente (canto inferior direito)." />
+      <PageHeader
+        title="Base de"
+        emphasis="Conhecimento"
+        description="Processos, padrões e procedimentos da LCR. Pergunte ao Mestre no assistente (canto inferior direito)."
+        actions={<Button onClick={() => setImportOpen(true)}><Plus className="mr-1 h-4 w-4" /> Importar conhecimento</Button>}
+      />
 
       <ResumoTela itens={[
         { label: "Processos", value: data.processos.length },
@@ -40,7 +157,7 @@ function KnowledgePage() {
         { label: "Artigos", value: data.artigos.length, tone: "ok" as const },
       ]} />
 
-      <Card>
+      <Card className="mb-6">
         <div className="grid grid-cols-1 gap-3 border-b border-border p-4 md:grid-cols-3">
           <div className="relative md:col-span-2">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
@@ -88,6 +205,33 @@ function KnowledgePage() {
           </TableBody>
         </Table>
       </Card>
+
+      <h2 className="mb-3 flex items-center gap-2 font-display text-xl"><FileText className="h-5 w-5 text-primary" /> Artigos</h2>
+      <Card>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Título</TableHead>
+              <TableHead className="w-40">Categoria</TableHead>
+              <TableHead>Tags</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {data.artigos.map((a) => (
+              <TableRow key={a.id}>
+                <TableCell className="font-medium">{a.titulo}</TableCell>
+                <TableCell>{a.categoria ? <Badge variant="secondary">{a.categoria}</Badge> : <span className="text-muted-foreground">—</span>}</TableCell>
+                <TableCell><div className="flex flex-wrap gap-1">{(a.tags ?? []).map((t) => <Badge key={t} variant="outline" className="text-[10px]">{t}</Badge>)}</div></TableCell>
+              </TableRow>
+            ))}
+            {data.artigos.length === 0 && (
+              <TableRow><TableCell colSpan={3} className="py-8 text-center text-muted-foreground">Nenhum artigo ainda. Use “Importar conhecimento” para adicionar conteúdo real.</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </Card>
+
+      <ImportarDialog processos={data.processos} open={importOpen} onOpenChange={setImportOpen} />
     </>
   );
 }
