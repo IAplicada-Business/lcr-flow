@@ -621,4 +621,149 @@ export const savePresetPermissoes = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+// ====================================================================
+// Cérebro LCR · leitura dos três pilares
+// ====================================================================
+
+export const getKnowledgeHub = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const [{ data: processos }, { data: artigos }, { data: videos }] = await Promise.all([
+      context.supabase.from("kb_processos").select("id, codigo, nome, area, descricao, link_execucao").eq("ativo", true).order("ordem"),
+      context.supabase.from("kb_articles").select("id, titulo, categoria, tags, created_at").eq("ativo", true).order("created_at", { ascending: false }).limit(10),
+      context.supabase.from("kb_videos").select("id, titulo, url, categoria, duracao_segundos, processo_id").order("created_at", { ascending: false }).limit(6),
+    ]);
+    const areas: Record<string, number> = {};
+    (processos ?? []).forEach((p) => { areas[p.area] = (areas[p.area] ?? 0) + 1; });
+    return {
+      processos: processos ?? [],
+      artigos: artigos ?? [],
+      videos: videos ?? [],
+      areas: Object.entries(areas).map(([area, total]) => ({ area, total })),
+    };
+  });
+
+export const getProcesso = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { codigo: string }) => z.object({ codigo: z.string().max(40) }).parse(d))
+  .handler(async ({ context, data }) => {
+    const { data: processo } = await context.supabase.from("kb_processos").select("*").eq("codigo", data.codigo).maybeSingle();
+    if (!processo) return { processo: null, passos: [], videos: [], artigos: [] };
+    const [{ data: passos }, { data: videos }, { data: artigos }] = await Promise.all([
+      context.supabase.from("kb_processo_passos").select("*").eq("processo_id", processo.id).order("ordem"),
+      context.supabase.from("kb_videos").select("*").eq("processo_id", processo.id),
+      context.supabase.from("kb_articles").select("id, titulo, categoria").eq("processo_id", processo.id).eq("ativo", true),
+    ]);
+    return { processo, passos: passos ?? [], videos: videos ?? [], artigos: artigos ?? [] };
+  });
+
+export const getConsultiveCarteira = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const [{ data: empresas }, { data: snaps }, { data: insights }] = await Promise.all([
+      context.supabase.from("empresas").select("id, razao_social, nome_fantasia, segmento").eq("ativo", true).order("razao_social"),
+      context.supabase.from("consultive_snapshots").select("empresa_id, periodo, margem_bruta, liquidez_corrente, receita_total, variacao_mes_anterior").order("periodo", { ascending: false }),
+      context.supabase.from("consultive_insights").select("empresa_id, severidade, status"),
+    ]);
+    const snapByEmp = new Map<string, NonNullable<typeof snaps>[number]>();
+    (snaps ?? []).forEach((s) => { if (!snapByEmp.has(s.empresa_id)) snapByEmp.set(s.empresa_id, s); });
+    const abertosByEmp = new Map<string, number>();
+    let abertosTotal = 0, criticosTotal = 0;
+    (insights ?? []).forEach((i) => {
+      if (i.status === "aberto") { abertosByEmp.set(i.empresa_id, (abertosByEmp.get(i.empresa_id) ?? 0) + 1); abertosTotal++; }
+      if (i.severidade === "alta" || i.severidade === "critica") criticosTotal++;
+    });
+    const clientes = (empresas ?? []).map((e) => {
+      const s = snapByEmp.get(e.id);
+      return {
+        id: e.id,
+        nome: e.nome_fantasia ?? e.razao_social,
+        segmento: e.segmento,
+        margem_bruta: s?.margem_bruta ?? null,
+        liquidez_corrente: s?.liquidez_corrente ?? null,
+        variacao: s?.variacao_mes_anterior ?? null,
+        insights_abertos: abertosByEmp.get(e.id) ?? 0,
+      };
+    });
+    return { clientes, totais: { clientes: clientes.length, insights_abertos: abertosTotal, insights_criticos: criticosTotal } };
+  });
+
+export const getConsultiveEmpresa = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { empresa_id: string }) => z.object({ empresa_id: z.string().uuid() }).parse(d))
+  .handler(async ({ context, data }) => {
+    const [{ data: empresa }, { data: snaps }, { data: insights }, { data: interacoes }] = await Promise.all([
+      context.supabase.from("empresas").select("id, razao_social, nome_fantasia, regime, segmento").eq("id", data.empresa_id).maybeSingle(),
+      context.supabase.from("consultive_snapshots").select("*").eq("empresa_id", data.empresa_id).order("periodo", { ascending: false }).limit(12),
+      context.supabase.from("consultive_insights").select("*").eq("empresa_id", data.empresa_id).order("created_at", { ascending: false }),
+      context.supabase.from("cerebro_interactions").select("id, pergunta, resposta, created_at").eq("empresa_id", data.empresa_id).eq("persona", "consultor").order("created_at", { ascending: false }).limit(10),
+    ]);
+    return { empresa, snapshots: snaps ?? [], insights: insights ?? [], interacoes: interacoes ?? [] };
+  });
+
+export const getCxCarteira = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const [{ data: health }, { data: nps }] = await Promise.all([
+      context.supabase.from("cx_health_score").select("empresa_id, score, classificacao, tendencia, empresas(razao_social, nome_fantasia)").order("score", { ascending: true }),
+      context.supabase.from("cx_nps_responses").select("score, periodo"),
+    ]);
+    const dist = { saudavel: 0, atencao: 0, risco: 0 };
+    let soma = 0;
+    (health ?? []).forEach((h) => {
+      if (h.classificacao && h.classificacao in dist) dist[h.classificacao as keyof typeof dist]++;
+      soma += h.score ?? 0;
+    });
+    const mediaHealth = (health ?? []).length ? Math.round(soma / (health ?? []).length) : 0;
+    // tendência NPS: média por período (últimos 6)
+    const byPeriodo = new Map<string, { soma: number; n: number; promotores: number; detratores: number }>();
+    (nps ?? []).forEach((r) => {
+      const k = r.periodo;
+      const cur = byPeriodo.get(k) ?? { soma: 0, n: 0, promotores: 0, detratores: 0 };
+      cur.soma += r.score; cur.n++;
+      if (r.score >= 9) cur.promotores++; else if (r.score <= 6) cur.detratores++;
+      byPeriodo.set(k, cur);
+    });
+    const npsTrend = Array.from(byPeriodo.entries())
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([periodo, v]) => ({ periodo, media: Math.round((v.soma / v.n) * 10) / 10, nps: Math.round(((v.promotores - v.detratores) / v.n) * 100) }))
+      .slice(-6);
+    const atencao = (health ?? []).filter((h) => h.classificacao !== "saudavel").slice(0, 8).map((h) => {
+      const e = h.empresas as { razao_social?: string; nome_fantasia?: string } | null;
+      return { id: h.empresa_id, nome: e?.nome_fantasia ?? e?.razao_social ?? "—", score: h.score, classificacao: h.classificacao, tendencia: h.tendencia };
+    });
+    return { mediaHealth, dist, npsTrend, atencao, total: (health ?? []).length };
+  });
+
+export const getCxEmpresa = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: { empresa_id: string }) => z.object({ empresa_id: z.string().uuid() }).parse(d))
+  .handler(async ({ context, data }) => {
+    const [{ data: empresa }, { data: health }, { data: tps }, { data: nps }] = await Promise.all([
+      context.supabase.from("empresas").select("id, razao_social, nome_fantasia").eq("id", data.empresa_id).maybeSingle(),
+      context.supabase.from("cx_health_score").select("*").eq("empresa_id", data.empresa_id).maybeSingle(),
+      context.supabase.from("cx_touchpoints").select("*").eq("empresa_id", data.empresa_id).order("created_at", { ascending: false }).limit(20),
+      context.supabase.from("cx_nps_responses").select("score, periodo, categoria").eq("empresa_id", data.empresa_id).order("periodo", { ascending: false }).limit(12),
+    ]);
+    return { empresa, health, touchpoints: tps ?? [], nps: nps ?? [] };
+  });
+
+export const registrarTouchpoint = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      empresa_id: z.string().uuid(),
+      tipo: z.string().max(40),
+      canal: z.string().max(60).optional().nullable(),
+      descricao: z.string().max(2000).optional().nullable(),
+    }).parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const { error } = await context.supabase.from("cx_touchpoints").insert({
+      empresa_id: data.empresa_id, tipo: data.tipo, canal: data.canal ?? null, descricao: data.descricao ?? null, usuario_lcr_id: context.userId,
+    });
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
 void competenciaInput;

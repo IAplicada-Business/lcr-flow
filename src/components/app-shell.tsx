@@ -1,5 +1,5 @@
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Building2, FileText, BookOpen, GitCompare, ListChecks, Settings, LogOut, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { LayoutDashboard, Building2, FileText, BookOpen, GitCompare, ListChecks, Settings, LogOut, PanelLeftClose, PanelLeftOpen, Brain, LineChart, HeartHandshake } from "lucide-react";
 import { LcrLogo } from "./brand";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient } from "@tanstack/react-query";
@@ -13,6 +13,9 @@ const NAV = [
   { to: "/lancamentos", label: "Lançamentos", icon: BookOpen, acesso: "lancamentos" },
   { to: "/conciliacao", label: "Conciliação", icon: GitCompare, acesso: "conciliacao" },
   { to: "/tarefas", label: "Tarefas", icon: ListChecks, acesso: "tarefas" },
+  { to: "/knowledge", label: "Base de Conhecimento", icon: Brain, acesso: "knowledge" },
+  { to: "/consultive", label: "Consultivo", icon: LineChart, acesso: "consultive" },
+  { to: "/cx", label: "CX · Experiência", icon: HeartHandshake, acesso: "cx" },
   { to: "/configuracoes", label: "Configurações", icon: Settings, acesso: "configuracoes" },
 ] as const;
 

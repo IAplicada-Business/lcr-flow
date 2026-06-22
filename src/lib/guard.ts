@@ -10,6 +10,9 @@ const ORDER: { key: string; to: string }[] = [
   { key: "lancamentos", to: "/lancamentos" },
   { key: "conciliacao", to: "/conciliacao" },
   { key: "tarefas", to: "/tarefas" },
+  { key: "knowledge", to: "/knowledge" },
+  { key: "consultive", to: "/consultive" },
+  { key: "cx", to: "/cx" },
   { key: "configuracoes", to: "/configuracoes" },
 ];
 
