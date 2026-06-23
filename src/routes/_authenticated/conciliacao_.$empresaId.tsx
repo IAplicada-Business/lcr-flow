@@ -9,7 +9,7 @@ import { getConciliacaoDetalhe, ensureConciliacao, setConciliacaoExtratoCsv, lis
 import { CONCILIACAO_STATUS_LABEL, formatCompetencia } from "@/lib/format";
 import { supabase } from "@/integrations/supabase/client";
 import { requireAcesso } from "@/lib/guard";
-import { ChevronLeft, Upload, Download, AlertCircle, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle } from "lucide-react";
+import { ChevronLeft, Upload, Download, AlertCircle, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle, FileText } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -54,7 +54,10 @@ function ConciliacaoCliente() {
     setBusy("extrato");
     try {
       const { id } = await ensureConciliacao({ data: { empresa_id: empresaId, competencia } });
-      const path = `${empresaId}/${competencia}/extrato-${crypto.randomUUID()}-${file.name}`;
+      // Sanitiza o nome do arquivo: remove acentos e troca caracteres inválidos
+      // (espaço, parênteses, etc.) por "_" — o Supabase Storage rejeita keys com eles.
+      const safeName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${empresaId}/${competencia}/extrato-${crypto.randomUUID()}-${safeName}`;
       const { error } = await supabase.storage.from("conciliacoes").upload(path, file, { upsert: false, cacheControl: "3600" });
       if (error) { toast.error(error.message); return; }
       await setConciliacaoExtratoCsv({ data: { id, extrato_csv_url: path } });
@@ -105,21 +108,37 @@ function ConciliacaoCliente() {
       </div>
 
       <h2 className="mb-1 font-display text-xl">Conciliar com extrato bancário (CSV)</h2>
-      <p className="mb-3 text-sm text-soft-foreground">A razão é a tabela de lançamentos acima (gerada pela IA). Importe só o extrato bancário para cruzar.</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
-        <FonteCard
-          titulo="Extrato bancário" enviado={temExtrato} busy={busy === "extrato"}
-          inputRef={extratoRef} onFile={(f) => enviar("extrato", f)}
-          onBaixar={() => conc?.extrato_csv_url && baixar(conc.extrato_csv_url)}
-        />
-      </div>
+      <p className="mb-4 text-sm text-soft-foreground">A razão é a tabela de lançamentos acima (gerada pela IA). Importe o extrato bancário para cruzar automaticamente.</p>
 
-      <div className="mb-6 flex flex-wrap items-center gap-3">
-        <Button onClick={conciliar} disabled={!temExtrato || busy === "conciliar"}>
-          <Wand2 className="h-4 w-4 mr-1.5" />{busy === "conciliar" ? "Conciliando..." : "Conciliar agora"}
-        </Button>
-        <span className="text-xs text-muted-foreground">Cruza os lançamentos da razão (acima) com o extrato — por regras (valor + data ±3 dias) e, no que sobrar, por IA.</span>
-      </div>
+      <input ref={extratoRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) enviar("extrato", f); }} />
+      <Card className="mb-3">
+        <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted">
+              <FileText className="h-5 w-5 text-primary" />
+            </div>
+            <div>
+              <div className="font-medium leading-tight">Extrato bancário</div>
+              <div className="text-xs text-muted-foreground">{temExtrato ? "Arquivo importado" : "Nenhum arquivo importado ainda"}</div>
+            </div>
+            <StatusPill variant={temExtrato ? "now" : "next"}>{temExtrato ? "Importado" : "Pendente"}</StatusPill>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="outline" size="sm" disabled={busy === "extrato"} onClick={() => extratoRef.current?.click()}>
+              <Upload className="mr-1 h-4 w-4" />{busy === "extrato" ? "Enviando..." : temExtrato ? "Substituir" : "Importar CSV"}
+            </Button>
+            {temExtrato && (
+              <Button variant="ghost" size="sm" onClick={() => conc?.extrato_csv_url && baixar(conc.extrato_csv_url)}>
+                <Download className="mr-1 h-4 w-4" />Baixar
+              </Button>
+            )}
+            <Button disabled={!temExtrato || busy === "conciliar"} onClick={conciliar}>
+              <Wand2 className="mr-1.5 h-4 w-4" />{busy === "conciliar" ? "Conciliando..." : "Conciliar agora"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+      <p className="mb-6 text-xs text-muted-foreground">Cruza os lançamentos da razão (acima) com o extrato — por regras (valor + data ±3 dias) e, no que sobrar, por IA.</p>
 
       {!resultado ? (
         <Card><CardContent className="py-10 text-center text-muted-foreground">
@@ -292,29 +311,6 @@ function LancamentosConciliacao({ empresaId, competencia }: { empresaId: string;
               {isLoading && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Carregando…</TableCell></TableRow>}
             </TableBody>
           </Table>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function FonteCard({ titulo, enviado, busy, inputRef, onFile, onBaixar }: {
-  titulo: string; enviado: boolean; busy: boolean;
-  inputRef: React.RefObject<HTMLInputElement | null>; onFile: (f: File) => void; onBaixar: () => void;
-}) {
-  return (
-    <Card>
-      <CardContent className="pt-6">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-display text-lg">{titulo}</h3>
-          <StatusPill variant={enviado ? "now" : "next"}>{enviado ? "Importado" : "Pendente"}</StatusPill>
-        </div>
-        <input ref={inputRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); }} />
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" disabled={busy} onClick={() => inputRef.current?.click()}>
-            <Upload className="h-4 w-4 mr-1" />{busy ? "Enviando..." : enviado ? "Substituir CSV" : "Importar CSV"}
-          </Button>
-          {enviado && <Button variant="ghost" size="sm" onClick={onBaixar}><Download className="h-4 w-4 mr-1" />Baixar</Button>}
         </div>
       </CardContent>
     </Card>
