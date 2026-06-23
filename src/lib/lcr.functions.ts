@@ -31,7 +31,7 @@ export const getDashboardStats = createServerFn({ method: "GET" })
         .in("status", ["atrasado", "cobranca"])
         .limit(8),
       supabase.from("documentos").select("status"),
-      supabase.from("conciliacoes").select("status"),
+      supabase.from("conciliacoes").select("status").eq("competencia", competencia),
       supabase.from("tarefas").select("status"),
     ]);
 
@@ -49,9 +49,14 @@ export const getDashboardStats = createServerFn({ method: "GET" })
     };
 
     const docsByStatus = countBy(docsRows.data, ["recebido", "classificado", "processado", "conciliado", "erro"]);
+    // Conciliação por status = foto do mês de TODOS os clientes: quem não iniciou
+    // conciliação na competência conta como "não iniciada".
+    const totalEmpresas = empresas.count ?? 0;
     const conciliacoesByStatus = countBy(conciliacoesRows.data, ["nao_iniciada", "em_andamento", "divergencias", "concluida"]);
+    const iniciadas = (conciliacoesRows.data ?? []).length;
+    conciliacoesByStatus.nao_iniciada += Math.max(0, totalEmpresas - iniciadas);
     const totalDocs = (docsRows.data ?? []).length;
-    const totalConciliacoes = (conciliacoesRows.data ?? []).length;
+    const totalConciliacoes = totalEmpresas;
     const tarefasAbertas = (tarefasRows.data ?? []).filter((t) => !["done", "concluida"].includes(t.status)).length;
 
     return {
@@ -59,7 +64,7 @@ export const getDashboardStats = createServerFn({ method: "GET" })
       clientesAtivos: empresas.count ?? 0,
       docsAguardando: docsAguardando.count ?? 0,
       lancamentosMes: lancamentosMes.count ?? 0,
-      conciliacoesPendentes: conciliacoesPendentes.count ?? 0,
+      conciliacoesPendentes: Math.max(0, totalEmpresas - conciliacoesByStatus.concluida),
       tarefasAbertas,
       totalDocs,
       totalConciliacoes,
@@ -480,6 +485,62 @@ export const bulkConciliarLancamentos = createServerFn({ method: "POST" })
     const { data: rows, error } = await q.select("id");
     if (error) throw new Error(error.message);
     return { ok: true, atualizados: rows?.length ?? 0 };
+  });
+
+type ResLinha = { data: string | null; descricao: string; valor: number; id?: string };
+type ResConc = {
+  conciliados?: { razao: ResLinha; extrato: ResLinha; fonte: string; motivo?: string }[];
+  conciliados_count?: number;
+  divergencias_razao?: ResLinha[];
+  divergencias_extrato?: ResLinha[];
+  [k: string]: unknown;
+};
+
+// Concilia manualmente um par (divergência da razão + divergência do extrato),
+// movendo-os para os conciliados no resultado salvo da conciliação.
+export const conciliarParManual = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ conciliacao_id: z.string().uuid(), razao_idx: z.number().int().min(0), extrato_idx: z.number().int().min(0) }).parse(d))
+  .handler(async ({ context, data }) => {
+    const { data: conc, error } = await context.supabase.from("conciliacoes").select("id, resultado").eq("id", data.conciliacao_id).maybeSingle();
+    if (error) throw new Error(error.message);
+    const r = (conc?.resultado ?? null) as ResConc | null;
+    if (!r) throw new Error("Conciliação ainda não foi executada.");
+    const razao = r.divergencias_razao?.[data.razao_idx];
+    const extrato = r.divergencias_extrato?.[data.extrato_idx];
+    if (!razao || !extrato) throw new Error("Item não encontrado.");
+    r.conciliados = [...(r.conciliados ?? []), { razao, extrato, fonte: "manual" }];
+    r.divergencias_razao = (r.divergencias_razao ?? []).filter((_, i) => i !== data.razao_idx);
+    r.divergencias_extrato = (r.divergencias_extrato ?? []).filter((_, i) => i !== data.extrato_idx);
+    r.conciliados_count = r.conciliados.length;
+    const divergencias_count = (r.divergencias_razao?.length ?? 0) + (r.divergencias_extrato?.length ?? 0);
+    const status = divergencias_count === 0 ? "concluida" : "divergencias";
+    const { error: upErr } = await context.supabase.from("conciliacoes")
+      .update({ resultado: r as never, divergencias_count, status, concluido_em: divergencias_count === 0 ? new Date().toISOString() : null })
+      .eq("id", data.conciliacao_id);
+    if (upErr) throw new Error(upErr.message);
+    return { ok: true, divergencias_count };
+  });
+
+// Edita um lançamento (corrigir data/valor/descrição) — usado para acertar uma
+// divergência antes de reconciliar.
+export const editarLancamento = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({
+    id: z.string().uuid(),
+    data_lancamento: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    valor: z.number().optional(),
+    descricao: z.string().max(200).optional(),
+  }).parse(d))
+  .handler(async ({ context, data }) => {
+    const patch: Record<string, unknown> = {};
+    if (data.data_lancamento) patch.data_lancamento = data.data_lancamento;
+    if (typeof data.valor === "number") patch.valor = Math.abs(data.valor);
+    if (data.descricao != null) patch.descricao = data.descricao;
+    if (Object.keys(patch).length === 0) return { ok: true };
+    const { error } = await context.supabase.from("lancamentos").update(patch as never).eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
   });
 
 // Revisão de classificação (TO-BE · Tarefa 5)

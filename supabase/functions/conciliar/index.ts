@@ -17,7 +17,7 @@ const fail = (error: string) => json(200, { ok: false, error });
 
 const MODEL = "claude-sonnet-4-6";
 
-type Linha = { data: string | null; descricao: string; valor: number };
+type Linha = { data: string | null; descricao: string; valor: number; id?: string };
 
 // ---- parsing helpers -------------------------------------------------
 function splitCsvLine(line: string, delim: string): string[] {
@@ -151,13 +151,14 @@ Deno.serve(async (req) => {
   // Não há mais upload de "razão SCI": a razão é a tabela de lançamentos da tela.
   const { data: lancRows, error: lErr } = await admin
     .from("lancamentos")
-    .select("data_lancamento, valor, descricao")
+    .select("id, data_lancamento, valor, descricao")
     .eq("empresa_id", conc.empresa_id)
     .eq("competencia", conc.competencia)
     .not("valor", "is", null)
     .range(0, 4999);
   if (lErr) return fail(lErr.message);
   const razao: Linha[] = (lancRows ?? []).map((r) => ({
+    id: r.id as string,
     data: r.data_lancamento ?? null,
     descricao: (r.descricao ?? "").slice(0, 200),
     valor: Number(r.valor) || 0,
