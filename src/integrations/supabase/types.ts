@@ -1263,8 +1263,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      agregar_lancamentos_sci: {
+        Args: { p_competencia: string; p_empresa_id: string }
+        Returns: {
+          conta_codigo: string
+          conta_descricao: string
+          conta_tipo: string
+          qtd_lancamentos: number
+          total: number
+        }[]
+      }
       is_admin: { Args: never; Returns: boolean }
-      update_meu_perfil: { Args: { p_avatar: string | null; p_nome: string }; Returns: undefined }
       sci_planilha: {
         Args: { p_competencia: string; p_empresa_id: string }
         Returns: {
@@ -1273,6 +1282,10 @@ export type Database = {
           tipo: string
           total: number
         }[]
+      }
+      update_meu_perfil: {
+        Args: { p_avatar: string; p_nome: string }
+        Returns: undefined
       }
     }
     Enums: {
