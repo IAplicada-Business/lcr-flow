@@ -686,7 +686,7 @@ export const updateMeuPerfil = createServerFn({ method: "POST" })
   .handler(async ({ context, data }) => {
     const { error } = await context.supabase.rpc("update_meu_perfil", {
       p_nome: data.nome,
-      p_avatar: data.avatar_url ?? null,
+      p_avatar: data.avatar_url ?? "",
     });
     if (error) throw new Error(error.message);
     return { ok: true };
