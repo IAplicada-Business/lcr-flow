@@ -1,4 +1,4 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useSuspenseQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { PageHeader, ResumoTela } from "@/components/app-shell";
@@ -10,7 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Download, Sparkles, Eye, Loader2 } from "lucide-react";
+import { Plus, Download, Sparkles, Eye, Loader2, ClipboardCheck } from "lucide-react";
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { listDocumentos, listEmpresas, createDocumento, setDocumentoStatus, ensureCompetencia } from "@/lib/lcr.functions";
 import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
@@ -168,6 +168,11 @@ function DocsPage() {
                     {temDados(d.dados_extraidos) && (
                       <Button variant="ghost" size="sm" onClick={() => setVerDados({ nome: d.arquivo_nome ?? d.empresa?.razao_social ?? "Documento", dados: d.dados_extraidos as Record<string, unknown> })} title="Ver dados extraídos">
                         <Eye className="h-4 w-4" />
+                      </Button>
+                    )}
+                    {(d.status_processamento === "classificado" || d.status_processamento === "revisado") && (
+                      <Button variant="ghost" size="sm" asChild title="Revisar classificação da IA">
+                        <Link to="/revisar/$documentoId" params={{ documentoId: d.id }}><ClipboardCheck className="h-4 w-4" /></Link>
                       </Button>
                     )}
                     {d.arquivo_url && (
