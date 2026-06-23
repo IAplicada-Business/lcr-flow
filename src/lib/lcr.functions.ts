@@ -221,7 +221,7 @@ export const listDocumentos = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data, error } = await context.supabase
       .from("documentos")
-      .select("id, tipo, competencia, origem, status, arquivo_nome, arquivo_url, dados_extraidos, recebido_em, empresa:empresa_id(id, razao_social), responsavel:responsavel_id(nome)")
+      .select("id, tipo, competencia, origem, status, status_processamento, arquivo_nome, arquivo_url, dados_extraidos, recebido_em, empresa:empresa_id(id, razao_social), responsavel:responsavel_id(nome)")
       .order("recebido_em", { ascending: false })
       .limit(500);
     if (error) throw new Error(error.message);
@@ -426,6 +426,67 @@ export const listConciliacoes = createServerFn({ method: "GET" })
       .order("razao_social");
     if (error) throw new Error(error.message);
     return { competencia, empresas: data ?? [] };
+  });
+
+// Conciliação sobre lançamentos reais (TO-BE · Tarefa 7) — lista os lançamentos
+// individuais da empresa/competência com conta/histórico e flags de revisão.
+export const listLancamentosConciliacao = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ empresa_id: z.string().uuid(), competencia: z.string().regex(/^\d{4}-\d{2}$/) }).parse(d))
+  .handler(async ({ context, data }) => {
+    const { data: empresa } = await context.supabase.from("empresas").select("id, razao_social, nome_fantasia").eq("id", data.empresa_id).maybeSingle();
+    const { data: rows, error } = await context.supabase
+      .from("lancamentos")
+      .select("id, data_lancamento, valor, descricao, conciliado, confidence, status, conta:conta_id(codigo, descricao, tipo), historico:historico_id(codigo, descricao)")
+      .eq("empresa_id", data.empresa_id)
+      .eq("competencia", data.competencia)
+      .not("valor", "is", null)
+      .order("data_lancamento", { ascending: true, nullsFirst: false })
+      .range(0, 4999);
+    if (error) throw new Error(error.message);
+    return { empresa, lancamentos: rows ?? [] };
+  });
+
+export const toggleLancamentoConciliado = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid(), conciliado: z.boolean() }).parse(d))
+  .handler(async ({ context, data }) => {
+    const { error } = await context.supabase.from("lancamentos").update({ conciliado: data.conciliado }).eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// Revisão de classificação (TO-BE · Tarefa 5)
+export const getDocumentoRevisao = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ context, data }) => {
+    const { data: doc, error } = await context.supabase
+      .from("documentos")
+      .select("id, empresa_id, tipo, competencia, arquivo_nome, arquivo_url, storage_path, status_processamento, lancamentos_gerados, classificacao_ia, empresa:empresas(razao_social, nome_fantasia, cnpj)")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (error) throw new Error(error.message);
+    return doc;
+  });
+
+export const aprovarDocumento = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ context, data }) => {
+    const { error } = await context.supabase.from("documentos").update({ status_processamento: "revisado", status: "conciliado" }).eq("id", data.id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
+  });
+
+// Limpa os lançamentos gerados por um documento (antes de reclassificar).
+export const limparLancamentosDocumento = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ documento_id: z.string().uuid() }).parse(d))
+  .handler(async ({ context, data }) => {
+    const { error } = await context.supabase.from("lancamentos").delete().eq("documento_id", data.documento_id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
   });
 
 // Garante a conciliação (empresa_id, competencia) e retorna o id.

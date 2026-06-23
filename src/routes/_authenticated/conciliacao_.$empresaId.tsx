@@ -1,16 +1,17 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useSuspenseQuery, useQueryClient } from "@tanstack/react-query";
+import { useSuspenseQuery, useQueryClient, useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusPill, variantFor } from "@/components/status-pill";
-import { getConciliacaoDetalhe, ensureConciliacao, setConciliacaoRazaoCsv, setConciliacaoExtratoCsv } from "@/lib/lcr.functions";
+import { getConciliacaoDetalhe, ensureConciliacao, setConciliacaoRazaoCsv, setConciliacaoExtratoCsv, listLancamentosConciliacao, toggleLancamentoConciliado } from "@/lib/lcr.functions";
 import { CONCILIACAO_STATUS_LABEL, formatCompetencia } from "@/lib/format";
 import { supabase } from "@/integrations/supabase/client";
 import { requireAcesso } from "@/lib/guard";
-import { ChevronLeft, Upload, Download, AlertCircle, CheckCircle2, Sparkles, Wand2 } from "lucide-react";
+import { ChevronLeft, Upload, Download, AlertCircle, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/conciliacao_/$empresaId")({
   beforeLoad: ({ context }) => requireAcesso(context.queryClient, "conciliacao", "/conciliacao"),
@@ -103,6 +104,11 @@ function ConciliacaoCliente() {
         )}
       </div>
 
+      <div className="mb-6">
+        <LancamentosConciliacao empresaId={empresaId} competencia={competencia} />
+      </div>
+
+      <h2 className="mb-3 font-display text-xl">Conciliação razão × extrato (CSV)</h2>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-5">
         <FonteCard
           titulo="Razão (SCI)" enviado={temRazao} busy={busy === "razao"}
@@ -164,6 +170,97 @@ function ConciliacaoCliente() {
         </div>
       )}
     </>
+  );
+}
+
+type LancConc = {
+  id: string; data_lancamento: string | null; valor: number | null; descricao: string | null;
+  conciliado: boolean; confidence: number | null;
+  conta: { codigo: string; descricao: string; tipo: string | null } | null;
+  historico: { codigo: string; descricao: string } | null;
+};
+
+function LancamentosConciliacao({ empresaId, competencia }: { empresaId: string; competencia: string }) {
+  const qc = useQueryClient();
+  const key = ["lanc-conc", empresaId, competencia];
+  const { data, isLoading } = useQuery({ queryKey: key, queryFn: () => listLancamentosConciliacao({ data: { empresa_id: empresaId, competencia } }) });
+  const lancs = (data?.lancamentos ?? []) as LancConc[];
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  const precisaRevisao = (l: LancConc) => (l.confidence != null && l.confidence < 0.7) || !l.conta;
+  const aRever = lancs.filter(precisaRevisao).length;
+  const conciliados = lancs.filter((l) => l.conciliado).length;
+
+  async function toggle(id: string, conciliado: boolean) {
+    setBusyId(id);
+    try {
+      await toggleLancamentoConciliado({ data: { id, conciliado } });
+      await qc.invalidateQueries({ queryKey: key });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro");
+    } finally { setBusyId(null); }
+  }
+
+  function aplicarRegraIA() {
+    if (aRever === 0) toast.success("Regra IA: nenhum lançamento com confiança baixa ou sem conta. 🎉");
+    else toast.warning(`Regra IA: ${aRever} lançamento(s) precisam de revisão (confiança < 0,7 ou sem conta sugerida) — destacados em amarelo.`);
+  }
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-6 py-3">
+        <div className="flex items-center gap-2">
+          <ListChecks className="h-4 w-4 text-primary" />
+          <h3 className="font-display text-lg">Lançamentos do mês</h3>
+          <span className="text-xs text-muted-foreground">· {lancs.length} lançamento(s) · {conciliados} conciliado(s)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          {aRever > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700"><AlertTriangle className="h-3 w-3" /> {aRever} a revisar</span>}
+          <Button variant="outline" size="sm" onClick={aplicarRegraIA}><Sparkles className="mr-1 h-4 w-4" /> Aplicar regra IA</Button>
+        </div>
+      </div>
+      <CardContent className="p-0">
+        <div className="max-h-[28rem] overflow-y-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-24">Data</TableHead>
+                <TableHead>Conta</TableHead>
+                <TableHead>Histórico</TableHead>
+                <TableHead>Descrição</TableHead>
+                <TableHead className="text-right">Valor</TableHead>
+                <TableHead className="w-28 text-center">Conciliado</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {lancs.map((l) => {
+                const alerta = precisaRevisao(l);
+                return (
+                  <TableRow key={l.id} className={cn(alerta && "bg-amber-50")}>
+                    <TableCell className="text-sm">{l.data_lancamento ? new Date(l.data_lancamento).toLocaleDateString("pt-BR") : "—"}</TableCell>
+                    <TableCell className="text-sm">
+                      {l.conta ? <span className="font-mono text-xs">{l.conta.codigo}</span> : <span className="inline-flex items-center gap-1 text-xs text-amber-700"><AlertTriangle className="h-3 w-3" /> sem conta</span>}
+                      {l.conta && <div className="text-xs text-muted-foreground">{l.conta.descricao}</div>}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{l.historico?.codigo ?? "—"}</TableCell>
+                    <TableCell className="max-w-[18rem] truncate text-sm" title={l.descricao ?? ""}>
+                      {l.descricao}
+                      {l.confidence != null && l.confidence < 0.7 && <span className="ml-1 text-[10px] text-amber-700">({Math.round(l.confidence * 100)}%)</span>}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm">{l.valor == null ? "—" : brl(l.valor)}</TableCell>
+                    <TableCell className="text-center">
+                      <input type="checkbox" checked={l.conciliado} disabled={busyId === l.id} onChange={(e) => toggle(l.id, e.target.checked)} className="h-4 w-4 cursor-pointer accent-[var(--color-primary)]" />
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+              {!isLoading && lancs.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Nenhum lançamento nesta competência. Faça upload de um documento para gerar lançamentos.</TableCell></TableRow>}
+              {isLoading && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Carregando…</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
