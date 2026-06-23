@@ -1,11 +1,13 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import { PageHeader, ResumoTela } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { getConsultiveCarteira } from "@/lib/lcr.functions";
+import { formatCompetencia } from "@/lib/format";
 import { requireAcesso } from "@/lib/guard";
 import { Search, ArrowRight, TrendingUp, TrendingDown } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -16,7 +18,7 @@ const SAUDE_CORES = { s: "#10b981", a: "#f59e0b", r: "#f43f5e" };
 export const Route = createFileRoute("/_authenticated/consultive")({
   beforeLoad: ({ context }) => requireAcesso(context.queryClient, "consultive", "/consultive"),
   head: () => ({ meta: [{ title: "Consultivo — LCR Contábil" }] }),
-  loader: ({ context }) => context.queryClient.ensureQueryData({ queryKey: ["consultive-carteira"], queryFn: () => getConsultiveCarteira() }),
+  loader: ({ context }) => context.queryClient.ensureQueryData({ queryKey: ["consultive-carteira", "latest"], queryFn: () => getConsultiveCarteira({ data: {} }) }),
   component: ConsultivePage,
   errorComponent: ({ error }) => <div className="p-6 text-destructive">Erro: {error.message}</div>,
 });
@@ -31,13 +33,14 @@ function saudeMargem(m: number | null) {
 }
 
 function ConsultivePage() {
-  const { data } = useSuspenseQuery({ queryKey: ["consultive-carteira"], queryFn: () => getConsultiveCarteira() });
+  const [comp, setComp] = useState("latest");
+  const { data } = useQuery({ queryKey: ["consultive-carteira", comp], queryFn: () => getConsultiveCarteira({ data: comp !== "latest" ? { competencia: comp } : {} }), placeholderData: keepPreviousData });
   const [q, setQ] = useState("");
-  const clientes = useMemo(() => data.clientes.filter((c) => !q || c.nome.toLowerCase().includes(q.toLowerCase())), [data.clientes, q]);
+  const clientes = useMemo(() => (data?.clientes ?? []).filter((c) => !q || c.nome.toLowerCase().includes(q.toLowerCase())), [data, q]);
 
   const { dist, margemMedia } = useMemo(() => {
     let s = 0, a = 0, r = 0, soma = 0, n = 0;
-    data.clientes.forEach((c) => {
+    (data?.clientes ?? []).forEach((c) => {
       const m = c.margem_bruta == null ? null : Number(c.margem_bruta);
       if (m == null) return;
       soma += m; n++;
@@ -51,11 +54,26 @@ function ConsultivePage() {
       ],
       margemMedia: n ? soma / n : null,
     };
-  }, [data.clientes]);
+  }, [data]);
+
+  if (!data) return null;
 
   return (
     <>
-      <PageHeader title="Painel" emphasis="Consultivo" description="Saúde financeira da carteira e insights estratégicos. Gere análises com o Consultor no assistente." />
+      <PageHeader
+        title="Painel"
+        emphasis="Consultivo"
+        description="Saúde financeira da carteira e insights estratégicos. Gere análises com o Consultor no assistente."
+        actions={
+          <Select value={comp} onValueChange={setComp}>
+            <SelectTrigger className="w-44"><SelectValue placeholder="Período" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="latest">Mais recente</SelectItem>
+              {data.competencias.map((c) => <SelectItem key={c} value={c}>{formatCompetencia(c)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        }
+      />
 
       <ResumoTela itens={[
         { label: "Clientes", value: data.totais.clientes },

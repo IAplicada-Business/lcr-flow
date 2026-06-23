@@ -14,9 +14,10 @@ const competenciaInput = z.object({ competencia: z.string().optional() }).option
 
 export const getDashboardStats = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) => z.object({ competencia: z.string().regex(/^\d{4}-\d{2}$/).optional() }).optional().parse(d ?? {}))
+  .handler(async ({ context, data }) => {
     const { supabase } = context;
-    const competencia = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const competencia = data?.competencia ?? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
 
     const [empresas, docsAguardando, lancamentosMes, conciliacoesPendentes, fases, atencaoUrgente, docsRows, conciliacoesRows, tarefasRows] = await Promise.all([
       supabase.from("empresas").select("id", { count: "exact", head: true }),
@@ -306,8 +307,9 @@ export const setDocumentoStatus = createServerFn({ method: "POST" })
 
 export const listLancamentosAgrupados = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
-    const competencia = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+  .inputValidator((d: unknown) => z.object({ competencia: z.string().regex(/^\d{4}-\d{2}$/).optional() }).optional().parse(d ?? {}))
+  .handler(async ({ context, data }) => {
+    const competencia = data?.competencia ?? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
     const [{ data: empresas }, { data: docs }, { data: lanc }] = await Promise.all([
       context.supabase.from("empresas").select("id, razao_social"),
       context.supabase.from("documentos").select("empresa_id, status").eq("competencia", competencia),
@@ -743,14 +745,20 @@ export const criarArtigoConhecimento = createServerFn({ method: "POST" })
 
 export const getConsultiveCarteira = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) => z.object({ competencia: z.string().regex(/^\d{4}-\d{2}$/).optional() }).optional().parse(d ?? {}))
+  .handler(async ({ context, data }) => {
     const [{ data: empresas }, { data: snaps }, { data: insights }] = await Promise.all([
       context.supabase.from("empresas").select("id, razao_social, nome_fantasia, segmento").eq("ativo", true).order("razao_social"),
       context.supabase.from("consultive_snapshots").select("empresa_id, periodo, margem_bruta, liquidez_corrente, receita_total, variacao_mes_anterior").order("periodo", { ascending: false }),
       context.supabase.from("consultive_insights").select("empresa_id, severidade, status"),
     ]);
+    const competencias = [...new Set((snaps ?? []).map((s) => String(s.periodo).slice(0, 7)))].sort().reverse();
+    const alvo = data?.competencia ?? null;
     const snapByEmp = new Map<string, NonNullable<typeof snaps>[number]>();
-    (snaps ?? []).forEach((s) => { if (!snapByEmp.has(s.empresa_id)) snapByEmp.set(s.empresa_id, s); });
+    (snaps ?? []).forEach((s) => {
+      if (alvo && String(s.periodo).slice(0, 7) !== alvo) return;
+      if (!snapByEmp.has(s.empresa_id)) snapByEmp.set(s.empresa_id, s);
+    });
     const abertosByEmp = new Map<string, number>();
     let abertosTotal = 0, criticosTotal = 0;
     (insights ?? []).forEach((i) => {
@@ -769,7 +777,7 @@ export const getConsultiveCarteira = createServerFn({ method: "GET" })
         insights_abertos: abertosByEmp.get(e.id) ?? 0,
       };
     });
-    return { clientes, totais: { clientes: clientes.length, insights_abertos: abertosTotal, insights_criticos: criticosTotal } };
+    return { clientes, competencias, totais: { clientes: clientes.length, insights_abertos: abertosTotal, insights_criticos: criticosTotal } };
   });
 
 export const getConsultiveEmpresa = createServerFn({ method: "GET" })
