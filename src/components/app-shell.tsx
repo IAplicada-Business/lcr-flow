@@ -1,5 +1,5 @@
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Building2, FileText, BookOpen, GitCompare, ListChecks, Settings, LogOut, PanelLeftClose, PanelLeftOpen, Brain, LineChart, HeartHandshake, Plug, Users, ListTree, ChevronDown, Bell, UserPen, Camera, History, Check, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Building2, ListChecks, Settings, LogOut, PanelLeftClose, PanelLeftOpen, Bell, UserPen, Camera, Check, type LucideIcon } from "lucide-react";
 import { LcrLogo } from "./brand";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
@@ -93,57 +93,40 @@ function MeuPerfilDialog({ open, onOpenChange, nomeInicial, avatarInicial }: { o
 }
 
 type NavLeaf = { to: string; label: string; icon: LucideIcon; acesso: string; tab?: string };
-type NavGroup = { label: string; icon: LucideIcon; itens: NavLeaf[] };
 
-const NAV_GROUPS: NavGroup[] = [
-  { label: "Visão geral", icon: LayoutDashboard, itens: [
-    { to: "/app", label: "Dashboard", icon: LayoutDashboard, acesso: "dashboard" },
-    { to: "/clientes", label: "Clientes", icon: Building2, acesso: "clientes" },
-  ] },
-  { label: "Ciclo contábil", icon: GitCompare, itens: [
-    { to: "/documentos", label: "Documentos", icon: FileText, acesso: "documentos" },
-    { to: "/lancamentos", label: "Lançamentos", icon: BookOpen, acesso: "lancamentos" },
-    { to: "/conciliacao", label: "Conciliação", icon: GitCompare, acesso: "conciliacao" },
-    { to: "/tarefas", label: "Tarefas", icon: ListChecks, acesso: "tarefas" },
-  ] },
-  { label: "Cérebro LCR", icon: Brain, itens: [
-    { to: "/knowledge", label: "Base de Conhecimento", icon: Brain, acesso: "knowledge" },
-    { to: "/consultive", label: "Consultivo", icon: LineChart, acesso: "consultive" },
-    { to: "/cx", label: "CX · Experiência", icon: HeartHandshake, acesso: "cx" },
-    { to: "/historico", label: "Histórico", icon: History, acesso: "historico" },
-  ] },
-  { label: "Configurações", icon: Settings, itens: [
-    { to: "/configuracoes", tab: "integracoes", label: "Integrações", icon: Plug, acesso: "configuracoes:integracoes" },
-    { to: "/configuracoes", tab: "usuarios", label: "Usuários", icon: Users, acesso: "configuracoes:usuarios" },
-    { to: "/configuracoes", tab: "plano", label: "Plano de contas", icon: ListTree, acesso: "configuracoes:plano" },
-  ] },
+// Menu lateral enxuto (4 itens). O ciclo contábil vive dentro do Painel do
+// Cliente (Carteira → cliente → abas), não mais como itens soltos.
+const NAV: NavLeaf[] = [
+  { to: "/app", label: "Início", icon: LayoutDashboard, acesso: "dashboard" },
+  { to: "/clientes", label: "Carteira", icon: Building2, acesso: "clientes" },
+  { to: "/tarefas", label: "Tarefas", icon: ListChecks, acesso: "tarefas" },
+  { to: "/configuracoes", tab: "integracoes", label: "Configurações", icon: Settings, acesso: "configuracoes:integracoes" },
 ];
 
-function leafAtiva(leaf: NavLeaf, pathname: string, tabAtual: string | undefined): boolean {
-  if (leaf.to === "/configuracoes") return pathname.startsWith("/configuracoes") && tabAtual === leaf.tab;
+function leafAtiva(leaf: NavLeaf, pathname: string): boolean {
+  if (leaf.to === "/configuracoes") return pathname.startsWith("/configuracoes");
+  if (leaf.to === "/clientes") return pathname.startsWith("/clientes");
   return pathname === leaf.to || (leaf.to !== "/app" && pathname.startsWith(leaf.to));
 }
 
-function NavLeafLink({ leaf, collapsed, active }: { leaf: NavLeaf; collapsed: boolean; active: boolean }) {
+function NavLeafLink({ leaf, active }: { leaf: NavLeaf; active: boolean }) {
   const Icon = leaf.icon;
   const className = cn(
-    "group relative flex items-center rounded-[20px] text-sm transition-all duration-200 ease-out",
-    collapsed ? "justify-center px-0 py-2.5" : "gap-3 py-2.5 pl-9 pr-3",
+    "group relative flex items-center gap-3 rounded-[16px] px-3 py-2.5 text-sm transition-all duration-200 ease-out",
     active
       ? "bg-sidebar-primary text-sidebar-primary-foreground font-semibold shadow-soft"
-      : "text-sidebar-foreground/70 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
+      : "text-sidebar-foreground/75 hover:bg-sidebar-accent/60 hover:text-sidebar-foreground",
   );
   const inner = (
     <>
-      {collapsed && <Icon className={cn("h-[18px] w-[18px] shrink-0 transition-colors", active ? "" : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground")} />}
-      {!collapsed && <span className="truncate">{leaf.label}</span>}
+      <Icon className={cn("h-[18px] w-[18px] shrink-0 transition-colors", active ? "" : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground")} />
+      <span className="truncate">{leaf.label}</span>
     </>
   );
-  const title = collapsed ? leaf.label : undefined;
   if (leaf.to === "/configuracoes") {
-    return <Link to="/configuracoes" search={{ tab: leaf.tab }} title={title} className={className}>{inner}</Link>;
+    return <Link to="/configuracoes" search={{ tab: leaf.tab }} className={className}>{inner}</Link>;
   }
-  return <Link to={leaf.to as "/app"} title={title} className={className}>{inner}</Link>;
+  return <Link to={leaf.to as "/app"} className={className}>{inner}</Link>;
 }
 
 // Topbar: toggle do menu à esquerda; notificações + perfil à direita.
@@ -255,17 +238,10 @@ export function AppShell({ children, userName, userRole, userAvatar, acessos }: 
   const router = useRouter();
   const qc = useQueryClient();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const tabAtual = useRouterState({ select: (s) => (s.location.search as { tab?: string }).tab });
   const [collapsed, setCollapsed] = useState(false);
 
-  // grupos visíveis conforme os acessos do usuário
-  const grupos = NAV_GROUPS
-    .map((g) => ({ ...g, itens: acessos ? g.itens.filter((i) => acessos.includes(i.acesso)) : g.itens }))
-    .filter((g) => g.itens.length > 0);
-
-  // dropdowns começam e permanecem fechados até o usuário clicar
-  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-  const toggleGroup = (label: string) => setOpenGroups((p) => ({ ...p, [label]: !p[label] }));
+  // itens visíveis conforme os acessos do usuário
+  const itens = acessos ? NAV.filter((i) => acessos.includes(i.acesso)) : NAV;
 
   // lê a preferência do usuário após montar (evita mismatch de hidratação)
   useEffect(() => {
@@ -300,35 +276,10 @@ export function AppShell({ children, userName, userRole, userAvatar, acessos }: 
         </div>
 
         <nav className="flex-1 overflow-y-auto px-3 py-3">
-          <div className="space-y-2">
-            {grupos.map((g) => {
-              const aberto = openGroups[g.label] ?? false;
-              const temAtivo = g.itens.some((i) => leafAtiva(i, pathname, tabAtual));
-              return (
-                <div key={g.label}>
-                  <button
-                    onClick={() => toggleGroup(g.label)}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-[14px] px-3 py-2.5 text-[11px] font-semibold uppercase tracking-wider shadow-soft transition-all duration-200",
-                      temAtivo
-                        ? "bg-sidebar-primary/20 text-sidebar-foreground"
-                        : "bg-sidebar-accent/50 text-sidebar-foreground/75 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground",
-                    )}
-                    aria-expanded={aberto}
-                  >
-                    <span className="flex-1 text-left">{g.label}</span>
-                    <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform duration-200", aberto ? "" : "-rotate-90")} />
-                  </button>
-                  {aberto && (
-                    <div className="mt-0.5 space-y-0.5">
-                      {g.itens.map((leaf) => (
-                        <NavLeafLink key={leaf.label} leaf={leaf} collapsed={false} active={leafAtiva(leaf, pathname, tabAtual)} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
+          <div className="space-y-1">
+            {itens.map((leaf) => (
+              <NavLeafLink key={leaf.label} leaf={leaf} active={leafAtiva(leaf, pathname)} />
+            ))}
           </div>
         </nav>
 

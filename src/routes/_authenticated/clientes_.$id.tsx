@@ -4,9 +4,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { getEmpresa } from "@/lib/lcr.functions";
-import { EMPRESA_STATUS_LABEL, REGIME_LABEL, DOC_TIPO_LABEL } from "@/lib/format";
+import { EMPRESA_STATUS_LABEL, REGIME_LABEL, DOC_TIPO_LABEL, competenciaAtual, formatCompetencia } from "@/lib/format";
 import { ChevronLeft } from "lucide-react";
 import { requireAcesso } from "@/lib/guard";
+import { RazaoContabil, ConciliacaoBancaria } from "./conciliacao_.$empresaId";
+import { DocumentosTab, PlanilhaSciTab, HistoricoTab } from "@/components/cliente/painel";
 
 export const Route = createFileRoute("/_authenticated/clientes_/$id")({
   beforeLoad: ({ context }) => requireAcesso(context.queryClient, "clientes", "/clientes"),
@@ -21,6 +23,7 @@ export const Route = createFileRoute("/_authenticated/clientes_/$id")({
 function ClienteDetalhe() {
   const { id } = Route.useParams();
   const { data: empresa } = useSuspenseQuery({ queryKey: ["empresa", id], queryFn: () => getEmpresa({ data: { id } }) });
+  const competencia = competenciaAtual();
 
   return (
     <>
@@ -39,18 +42,18 @@ function ClienteDetalhe() {
         </div>
         <div className="text-right text-sm text-muted-foreground">
           <div className="font-mono">{empresa.cnpj}</div>
-          <div>{REGIME_LABEL[empresa.regime]}</div>
+          <div>{REGIME_LABEL[empresa.regime]} · Competência {formatCompetencia(competencia)}</div>
         </div>
       </div>
 
       <Tabs defaultValue="visao">
-        <TabsList>
+        <TabsList className="flex-wrap">
           <TabsTrigger value="visao">Visão geral</TabsTrigger>
           <TabsTrigger value="documentos">Documentos</TabsTrigger>
-          <TabsTrigger value="lancamentos">Lançamentos</TabsTrigger>
-          <TabsTrigger value="conciliacao">Conciliação</TabsTrigger>
+          <TabsTrigger value="razao">Razão contábil</TabsTrigger>
+          <TabsTrigger value="conciliacao">Conciliação bancária</TabsTrigger>
+          <TabsTrigger value="sci">Planilha SCI</TabsTrigger>
           <TabsTrigger value="historico">Histórico</TabsTrigger>
-          <TabsTrigger value="config">Configurações</TabsTrigger>
         </TabsList>
 
         <TabsContent value="visao" className="mt-4">
@@ -87,11 +90,11 @@ function ClienteDetalhe() {
           </div>
         </TabsContent>
 
-        <TabsContent value="documentos" className="mt-4"><Card className="border-border"><CardContent className="pt-6 text-sm text-muted-foreground">Use a tela <Link to="/documentos" className="text-primary hover:underline">Documentos</Link> para gerir os documentos deste cliente.</CardContent></Card></TabsContent>
-        <TabsContent value="lancamentos" className="mt-4"><Card className="border-border"><CardContent className="pt-6 text-sm text-muted-foreground">Histórico de planilhas SCI deste cliente em <Link to="/lancamentos" className="text-primary hover:underline">Lançamentos</Link>.</CardContent></Card></TabsContent>
-        <TabsContent value="conciliacao" className="mt-4"><Card className="border-border"><CardContent className="pt-6 text-sm text-muted-foreground">Acesse <Link to="/conciliacao" className="text-primary hover:underline">Conciliação</Link> para iniciar o batimento.</CardContent></Card></TabsContent>
-        <TabsContent value="historico" className="mt-4"><Card className="border-border"><CardContent className="pt-6 text-sm text-muted-foreground">Histórico de competências fechadas será exibido aqui.</CardContent></Card></TabsContent>
-        <TabsContent value="config" className="mt-4"><Card className="border-border"><CardContent className="pt-6 text-sm text-muted-foreground">Configurações de plano de contas, históricos padrão e integrações específicas deste cliente.</CardContent></Card></TabsContent>
+        <TabsContent value="documentos" className="mt-4"><DocumentosTab empresaId={id} /></TabsContent>
+        <TabsContent value="razao" className="mt-4"><RazaoContabil empresaId={id} competencia={competencia} /></TabsContent>
+        <TabsContent value="conciliacao" className="mt-4"><ConciliacaoBancaria empresaId={id} competencia={competencia} /></TabsContent>
+        <TabsContent value="sci" className="mt-4"><PlanilhaSciTab empresaId={id} empresaNome={empresa.razao_social} competencia={competencia} /></TabsContent>
+        <TabsContent value="historico" className="mt-4"><HistoricoTab empresaId={id} /></TabsContent>
       </Tabs>
     </>
   );

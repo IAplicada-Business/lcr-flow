@@ -4,9 +4,9 @@ import { useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { StatusPill, variantFor } from "@/components/status-pill";
-import { getConciliacaoDetalhe, ensureConciliacao, setConciliacaoExtratoCsv, listLancamentosConciliacao, toggleLancamentoConciliado, bulkConciliarLancamentos } from "@/lib/lcr.functions";
-import { CONCILIACAO_STATUS_LABEL, formatCompetencia } from "@/lib/format";
+import { StatusPill } from "@/components/status-pill";
+import { getConciliacaoDetalhe, ensureConciliacao, setConciliacaoExtratoCsv, listLancamentosConciliacao } from "@/lib/lcr.functions";
+import { formatCompetencia } from "@/lib/format";
 import { supabase } from "@/integrations/supabase/client";
 import { requireAcesso } from "@/lib/guard";
 import { ChevronLeft, Upload, Download, AlertCircle, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle, FileText } from "lucide-react";
@@ -37,26 +37,145 @@ async function baixar(path: string) {
   window.open(data.signedUrl, "_blank", "noopener,noreferrer");
 }
 
+// Rota standalone (continua acessível); reaproveita os mesmos blocos do Painel do Cliente.
 function ConciliacaoCliente() {
   const { empresaId } = Route.useParams();
+  const { data } = useSuspenseQuery({ queryKey: ["conciliacao-detalhe", empresaId], queryFn: () => getConciliacaoDetalhe({ data: { empresa_id: empresaId } }) });
+  const competencia = data.competencia;
+
+  return (
+    <>
+      <Link to="/conciliacao" className="inline-flex items-center text-sm text-soft-foreground hover:text-primary mb-4">
+        <ChevronLeft className="h-4 w-4 mr-1" />Conciliação
+      </Link>
+      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-display text-3xl">{data.empresa.razao_social}</h1>
+          <p className="mt-1 text-sm text-soft-foreground">Competência {formatCompetencia(competencia)}</p>
+        </div>
+      </div>
+
+      <div className="mb-6">
+        <RazaoContabil empresaId={empresaId} competencia={competencia} />
+      </div>
+      <ConciliacaoBancaria empresaId={empresaId} competencia={competencia} />
+    </>
+  );
+}
+
+type LancConc = {
+  id: string; data_lancamento: string | null; valor: number | null; descricao: string | null;
+  conciliado: boolean; confidence: number | null;
+  conta: { codigo: string; descricao: string; tipo: string | null } | null;
+  historico: { codigo: string; descricao: string } | null;
+};
+
+const precisaRevisao = (l: LancConc) => (l.confidence != null && l.confidence < 0.7) || !l.conta;
+function statusLancamento(l: LancConc): { label: string; variant: Parameters<typeof StatusPill>[0]["variant"] } {
+  if (l.conciliado) return { label: "Conciliado", variant: "now" };
+  if (precisaRevisao(l)) return { label: "Aguardando revisão", variant: "back" };
+  return { label: "Aprovado", variant: "next" };
+}
+
+// TAB "Razão contábil": lançamentos da IA da competência, com status por linha e
+// "Revisar com IA". NÃO concilia aqui (a conciliação fica na aba/bloco de baixo).
+export function RazaoContabil({ empresaId, competencia }: { empresaId: string; competencia: string }) {
+  const key = ["lanc-conc", empresaId, competencia];
+  const { data, isLoading } = useQuery({ queryKey: key, queryFn: () => listLancamentosConciliacao({ data: { empresa_id: empresaId, competencia } }) });
+  const lancs = (data?.lancamentos ?? []) as LancConc[];
+  const [soARevisar, setSoARevisar] = useState(false);
+
+  const aRever = lancs.filter(precisaRevisao).length;
+  const aprovados = lancs.filter((l) => !precisaRevisao(l)).length;
+  const visiveis = soARevisar ? lancs.filter(precisaRevisao) : lancs;
+
+  function revisarComIA() {
+    if (lancs.length === 0) { toast.info("Nenhum lançamento nesta competência."); return; }
+    if (aRever === 0) toast.success(`Revisão IA: os ${aprovados} lançamento(s) estão com conta sugerida e confiança alta. Nada a revisar. 🎉`);
+    else toast.warning(`Revisão IA: ${aprovados} aprovado(s) automaticamente. ${aRever} precisam da sua revisão (confiança < 70% ou sem conta) — destacados em amarelo.`);
+  }
+
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-6 py-3">
+        <div className="flex items-center gap-2">
+          <ListChecks className="h-4 w-4 text-primary" />
+          <h3 className="font-display text-lg">Razão contábil · lançamentos da competência</h3>
+          <span className="text-xs text-muted-foreground">· {lancs.length} lançamento(s) · {aprovados} aprovado(s)</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
+            <input type="checkbox" checked={soARevisar} onChange={(e) => setSoARevisar(e.target.checked)} className="h-3.5 w-3.5 cursor-pointer accent-[var(--color-primary)]" />
+            Mostrar só a revisar
+          </label>
+          {aRever > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700"><AlertTriangle className="h-3 w-3" /> {aRever} a revisar</span>}
+          <Button variant="outline" size="sm" disabled={lancs.length === 0} onClick={revisarComIA} title="A IA valida os lançamentos com conta sugerida e confiança alta (≥70%) e destaca os que precisam de revisão.">
+            <Sparkles className="mr-1 h-4 w-4" /> Revisar com IA
+          </Button>
+        </div>
+      </div>
+      <CardContent className="p-0">
+        <div className="max-h-[28rem] overflow-y-auto">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="w-24">Data</TableHead>
+                <TableHead>Conta</TableHead>
+                <TableHead>Histórico</TableHead>
+                <TableHead>Descrição</TableHead>
+                <TableHead className="text-right">Valor</TableHead>
+                <TableHead className="w-40">Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {visiveis.map((l) => {
+                const alerta = precisaRevisao(l);
+                const st = statusLancamento(l);
+                return (
+                  <TableRow key={l.id} className={cn(alerta && "bg-amber-50")}>
+                    <TableCell className="text-sm">{l.data_lancamento ? new Date(l.data_lancamento).toLocaleDateString("pt-BR") : "—"}</TableCell>
+                    <TableCell className="text-sm">
+                      {l.conta ? <span className="font-mono text-xs">{l.conta.codigo}</span> : <span className="inline-flex items-center gap-1 text-xs text-amber-700"><AlertTriangle className="h-3 w-3" /> sem conta</span>}
+                      {l.conta && <div className="text-xs text-muted-foreground">{l.conta.descricao}</div>}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted-foreground">{l.historico?.codigo ?? "—"}</TableCell>
+                    <TableCell className="max-w-[18rem] truncate text-sm" title={l.descricao ?? ""}>
+                      {l.descricao}
+                      {l.confidence != null && l.confidence < 0.7 && <span className="ml-1 text-[10px] text-amber-700">({Math.round(l.confidence * 100)}%)</span>}
+                    </TableCell>
+                    <TableCell className="text-right font-mono text-sm">{l.valor == null ? "—" : brl(l.valor)}</TableCell>
+                    <TableCell><StatusPill variant={st.variant}>{st.label}</StatusPill></TableCell>
+                  </TableRow>
+                );
+              })}
+              {!isLoading && visiveis.length === 0 && lancs.length > 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Nada a revisar — todos aprovados.</TableCell></TableRow>}
+              {!isLoading && lancs.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Nenhum lançamento nesta competência. Processe um documento com IA para gerar lançamentos.</TableCell></TableRow>}
+              {isLoading && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Carregando…</TableCell></TableRow>}
+            </TableBody>
+          </Table>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+// TAB "Conciliação bancária": cruza os lançamentos (razão) com o extrato importado.
+export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: string; competencia: string }) {
   const qc = useQueryClient();
   const key = ["conciliacao-detalhe", empresaId];
-  const { data } = useSuspenseQuery({ queryKey: key, queryFn: () => getConciliacaoDetalhe({ data: { empresa_id: empresaId } }) });
+  const { data } = useQuery({ queryKey: key, queryFn: () => getConciliacaoDetalhe({ data: { empresa_id: empresaId } }) });
   const extratoRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState<"extrato" | "conciliar" | null>(null);
 
-  const conc = data.conciliacao;
-  const competencia = data.competencia;
+  const conc = data?.conciliacao ?? null;
   const resultado = (conc?.resultado ?? null) as Resultado;
   const temExtrato = !!conc?.extrato_csv_url;
 
-  async function enviar(_tipo: "extrato", file: File) {
+  async function enviarExtrato(file: File) {
     setBusy("extrato");
     try {
       const { id } = await ensureConciliacao({ data: { empresa_id: empresaId, competencia } });
-      // Sanitiza o nome do arquivo: remove acentos e troca caracteres inválidos
-      // (espaço, parênteses, etc.) por "_" — o Supabase Storage rejeita keys com eles.
-      const safeName = file.name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+      const safeName = file.name.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9._-]/g, "_");
       const path = `${empresaId}/${competencia}/extrato-${crypto.randomUUID()}-${safeName}`;
       const { error } = await supabase.storage.from("conciliacoes").upload(path, file, { upsert: false, cacheControl: "3600" });
       if (error) { toast.error(error.message); return; }
@@ -90,27 +209,10 @@ function ConciliacaoCliente() {
 
   return (
     <>
-      <Link to="/conciliacao" className="inline-flex items-center text-sm text-soft-foreground hover:text-primary mb-4">
-        <ChevronLeft className="h-4 w-4 mr-1" />Conciliação
-      </Link>
-      <div className="mb-6 flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="font-display text-3xl">{data.empresa.razao_social}</h1>
-          <p className="mt-1 text-sm text-soft-foreground">Competência {formatCompetencia(competencia)}</p>
-        </div>
-        {conc && (
-          <StatusPill variant={variantFor(conc.status)}>{CONCILIACAO_STATUS_LABEL[conc.status as keyof typeof CONCILIACAO_STATUS_LABEL]}</StatusPill>
-        )}
-      </div>
-
-      <div className="mb-6">
-        <LancamentosConciliacao empresaId={empresaId} competencia={competencia} />
-      </div>
-
       <h2 className="mb-1 font-display text-xl">Conciliar com extrato bancário (CSV)</h2>
-      <p className="mb-4 text-sm text-soft-foreground">A razão é a tabela de lançamentos acima (gerada pela IA). Importe o extrato bancário para cruzar automaticamente.</p>
+      <p className="mb-4 text-sm text-soft-foreground">A razão são os lançamentos aprovados (gerados pela IA). Importe o extrato bancário para cruzar automaticamente.</p>
 
-      <input ref={extratoRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) enviar("extrato", f); }} />
+      <input ref={extratoRef} type="file" accept=".csv,text/csv" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) enviarExtrato(f); }} />
       <Card className="mb-3">
         <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
           <div className="flex items-center gap-3">
@@ -138,7 +240,7 @@ function ConciliacaoCliente() {
           </div>
         </CardContent>
       </Card>
-      <p className="mb-6 text-xs text-muted-foreground">Cruza os lançamentos da razão (acima) com o extrato — por regras (valor + data ±3 dias) e, no que sobrar, por IA.</p>
+      <p className="mb-6 text-xs text-muted-foreground">Cruza os lançamentos da razão com o extrato — por regras (valor + data ±3 dias) e, no que sobrar, por IA.</p>
 
       {!resultado ? (
         <Card><CardContent className="py-10 text-center text-muted-foreground">
@@ -181,139 +283,6 @@ function ConciliacaoCliente() {
         </div>
       )}
     </>
-  );
-}
-
-type LancConc = {
-  id: string; data_lancamento: string | null; valor: number | null; descricao: string | null;
-  conciliado: boolean; confidence: number | null;
-  conta: { codigo: string; descricao: string; tipo: string | null } | null;
-  historico: { codigo: string; descricao: string } | null;
-};
-
-function LancamentosConciliacao({ empresaId, competencia }: { empresaId: string; competencia: string }) {
-  const qc = useQueryClient();
-  const key = ["lanc-conc", empresaId, competencia];
-  const { data, isLoading } = useQuery({ queryKey: key, queryFn: () => listLancamentosConciliacao({ data: { empresa_id: empresaId, competencia } }) });
-  const lancs = (data?.lancamentos ?? []) as LancConc[];
-  const [busyId, setBusyId] = useState<string | null>(null);
-
-  const precisaRevisao = (l: LancConc) => (l.confidence != null && l.confidence < 0.7) || !l.conta;
-  const aRever = lancs.filter(precisaRevisao).length;
-  const conciliados = lancs.filter((l) => l.conciliado).length;
-  const todosConciliados = lancs.length > 0 && conciliados === lancs.length;
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [soNaoConciliados, setSoNaoConciliados] = useState(false);
-  const visiveis = soNaoConciliados ? lancs.filter((l) => !l.conciliado) : lancs;
-
-  async function toggle(id: string, conciliado: boolean) {
-    setBusyId(id);
-    try {
-      await toggleLancamentoConciliado({ data: { id, conciliado } });
-      await qc.invalidateQueries({ queryKey: key });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro");
-    } finally { setBusyId(null); }
-  }
-
-  async function toggleTodos(marcar: boolean) {
-    setBulkBusy(true);
-    try {
-      const res = await bulkConciliarLancamentos({ data: { empresa_id: empresaId, competencia, conciliado: marcar } });
-      await qc.invalidateQueries({ queryKey: key });
-      toast.success(`${res.atualizados} lançamento(s) ${marcar ? "marcado(s)" : "desmarcado(s)"}.`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro");
-    } finally { setBulkBusy(false); }
-  }
-
-  async function aplicarRegraIA() {
-    setBulkBusy(true);
-    try {
-      const res = await bulkConciliarLancamentos({ data: { empresa_id: empresaId, competencia, conciliado: true, apenasAlta: true } });
-      await qc.invalidateQueries({ queryKey: key });
-      if (res.atualizados === 0 && aRever === 0) toast.success("Regra IA: tudo já está conciliado. 🎉");
-      else if (aRever > 0) toast.warning(`Regra IA: ${res.atualizados} conciliado(s) automaticamente. ${aRever} lançamento(s) ainda precisam de revisão (confiança < 70% ou sem conta) — destacados em amarelo.`);
-      else toast.success(`Regra IA: ${res.atualizados} lançamento(s) conciliados automaticamente.`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro");
-    } finally { setBulkBusy(false); }
-  }
-
-  return (
-    <Card>
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-6 py-3">
-        <div className="flex items-center gap-2">
-          <ListChecks className="h-4 w-4 text-primary" />
-          <h3 className="font-display text-lg">Razão contábil · lançamentos da competência</h3>
-          <span className="text-xs text-muted-foreground">· {lancs.length} lançamento(s) · {conciliados} conciliado(s)</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <label className="inline-flex cursor-pointer items-center gap-1.5 text-xs text-muted-foreground">
-            <input type="checkbox" checked={soNaoConciliados} onChange={(e) => setSoNaoConciliados(e.target.checked)} className="h-3.5 w-3.5 cursor-pointer accent-[var(--color-primary)]" />
-            Mostrar só não conciliados
-          </label>
-          {aRever > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700"><AlertTriangle className="h-3 w-3" /> {aRever} a revisar</span>}
-          <Button variant="outline" size="sm" disabled={bulkBusy || lancs.length === 0} onClick={aplicarRegraIA} title="Concilia automaticamente os lançamentos com conta sugerida e confiança alta (≥70%).">
-            <Sparkles className="mr-1 h-4 w-4" /> Aplicar regra IA
-          </Button>
-        </div>
-      </div>
-      <CardContent className="p-0">
-        <div className="max-h-[28rem] overflow-y-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-24">Data</TableHead>
-                <TableHead>Conta</TableHead>
-                <TableHead>Histórico</TableHead>
-                <TableHead>Descrição</TableHead>
-                <TableHead className="text-right">Valor</TableHead>
-                <TableHead className="w-28 text-center">
-                  <div className="inline-flex items-center gap-1.5">
-                    <input
-                      type="checkbox"
-                      checked={todosConciliados}
-                      disabled={bulkBusy || lancs.length === 0}
-                      onChange={(e) => toggleTodos(e.target.checked)}
-                      className="h-4 w-4 cursor-pointer accent-[var(--color-primary)]"
-                      title={todosConciliados ? "Desmarcar todos" : "Marcar todos"}
-                    />
-                    <span>Conciliado</span>
-                  </div>
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {visiveis.map((l) => {
-                const alerta = precisaRevisao(l);
-                return (
-                  <TableRow key={l.id} className={cn(alerta && "bg-amber-50")}>
-                    <TableCell className="text-sm">{l.data_lancamento ? new Date(l.data_lancamento).toLocaleDateString("pt-BR") : "—"}</TableCell>
-                    <TableCell className="text-sm">
-                      {l.conta ? <span className="font-mono text-xs">{l.conta.codigo}</span> : <span className="inline-flex items-center gap-1 text-xs text-amber-700"><AlertTriangle className="h-3 w-3" /> sem conta</span>}
-                      {l.conta && <div className="text-xs text-muted-foreground">{l.conta.descricao}</div>}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-muted-foreground">{l.historico?.codigo ?? "—"}</TableCell>
-                    <TableCell className="max-w-[18rem] truncate text-sm" title={l.descricao ?? ""}>
-                      {l.descricao}
-                      {l.confidence != null && l.confidence < 0.7 && <span className="ml-1 text-[10px] text-amber-700">({Math.round(l.confidence * 100)}%)</span>}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-sm">{l.valor == null ? "—" : brl(l.valor)}</TableCell>
-                    <TableCell className="text-center">
-                      <input type="checkbox" checked={l.conciliado} disabled={busyId === l.id} onChange={(e) => toggle(l.id, e.target.checked)} className="h-4 w-4 cursor-pointer accent-[var(--color-primary)]" />
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-              {!isLoading && visiveis.length === 0 && lancs.length > 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Todos os lançamentos já estão conciliados.</TableCell></TableRow>}
-              {!isLoading && lancs.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Nenhum lançamento nesta competência. Faça upload de um documento para gerar lançamentos.</TableCell></TableRow>}
-              {isLoading && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Carregando…</TableCell></TableRow>}
-            </TableBody>
-          </Table>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 
