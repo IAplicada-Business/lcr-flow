@@ -4,12 +4,15 @@ import { useRef, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusPill } from "@/components/status-pill";
-import { getConciliacaoDetalhe, ensureConciliacao, setConciliacaoExtratoCsv, listLancamentosConciliacao } from "@/lib/lcr.functions";
+import { getConciliacaoDetalhe, ensureConciliacao, setConciliacaoExtratoCsv, listLancamentosConciliacao, conciliarParManual, editarLancamento } from "@/lib/lcr.functions";
 import { formatCompetencia } from "@/lib/format";
 import { supabase } from "@/integrations/supabase/client";
 import { requireAcesso } from "@/lib/guard";
-import { ChevronLeft, Upload, Download, AlertCircle, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle, FileText } from "lucide-react";
+import { ChevronLeft, Upload, Download, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle, FileText, Link2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -24,7 +27,7 @@ export const Route = createFileRoute("/_authenticated/conciliacao_/$empresaId")(
 
 const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-type Linha = { data: string | null; descricao: string; valor: number };
+type Linha = { data: string | null; descricao: string; valor: number; id?: string };
 type Resultado = {
   total_razao: number; total_extrato: number; conciliados_count: number;
   conciliados: { razao: Linha; extrato: Linha; fonte: string; motivo?: string }[];
@@ -207,6 +210,40 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
     }
   }
 
+  // seleção para pareamento manual + edição de lançamento na divergência
+  const [selRazao, setSelRazao] = useState<number | null>(null);
+  const [selExtrato, setSelExtrato] = useState<number | null>(null);
+  const [edit, setEdit] = useState<{ id: string; data: string; valor: string; descricao: string } | null>(null);
+  const [acting, setActing] = useState(false);
+
+  async function conciliarManual() {
+    if (!conc || selRazao === null || selExtrato === null) return;
+    setActing(true);
+    try {
+      await conciliarParManual({ data: { conciliacao_id: conc.id, razao_idx: selRazao, extrato_idx: selExtrato } });
+      setSelRazao(null); setSelExtrato(null);
+      await qc.invalidateQueries({ queryKey: key });
+      await qc.invalidateQueries({ queryKey: ["conciliacoes"] });
+      toast.success("Par conciliado manualmente.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro");
+    } finally { setActing(false); }
+  }
+
+  async function salvarEdicao() {
+    if (!edit) return;
+    setActing(true);
+    try {
+      await editarLancamento({ data: { id: edit.id, data_lancamento: edit.data || undefined, valor: edit.valor ? Number(edit.valor.replace(",", ".")) : undefined, descricao: edit.descricao || undefined } });
+      setEdit(null);
+      await qc.invalidateQueries({ queryKey: ["lanc-conc"] });
+      toast.success("Lançamento atualizado. Reconciliando…");
+      await conciliar();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro");
+    } finally { setActing(false); }
+  }
+
   return (
     <>
       <h2 className="mb-1 font-display text-xl">Conciliar com extrato bancário (CSV)</h2>
@@ -276,13 +313,85 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
             </Table>
           </Secao>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            <Divergencias titulo="Na razão, sem par no extrato" linhas={resultado.divergencias_razao} />
-            <Divergencias titulo="No extrato, sem par na razão" linhas={resultado.divergencias_extrato} />
-          </div>
+          {(resultado.divergencias_razao.length > 0 || resultado.divergencias_extrato.length > 0) && (
+            <Card className="border-amber-200">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-amber-50/60 px-6 py-3">
+                <div className="flex items-center gap-2"><AlertTriangle className="h-4 w-4 text-amber-600" /><h3 className="font-display text-lg">Divergências — ajuste manual</h3></div>
+                <Button size="sm" disabled={acting || selRazao === null || selExtrato === null} onClick={conciliarManual}>
+                  <Link2 className="mr-1 h-4 w-4" /> Conciliar par selecionado
+                </Button>
+              </div>
+              <CardContent className="grid grid-cols-1 gap-5 p-5 lg:grid-cols-2">
+                <DivergCol
+                  titulo="Na razão, sem par no extrato" linhas={resultado.divergencias_razao}
+                  sel={selRazao} onSel={(i) => setSelRazao(selRazao === i ? null : i)}
+                  onEdit={(l) => setEdit({ id: l.id ?? "", data: l.data ?? "", valor: String(l.valor ?? ""), descricao: l.descricao ?? "" })}
+                />
+                <DivergCol
+                  titulo="No extrato, sem par na razão" linhas={resultado.divergencias_extrato}
+                  sel={selExtrato} onSel={(i) => setSelExtrato(selExtrato === i ? null : i)}
+                />
+              </CardContent>
+              <div className="px-6 pb-4 text-xs text-muted-foreground">
+                Selecione uma linha de cada lado e clique em <strong>Conciliar par selecionado</strong> para casar manualmente. Ou edite o lançamento da razão (✏️) para corrigir valor/data e reconciliar automaticamente.
+              </div>
+            </Card>
+          )}
         </div>
       )}
+
+      <Dialog open={!!edit} onOpenChange={(o) => !o && setEdit(null)}>
+        <DialogContent>
+          <DialogHeader><DialogTitle className="font-display text-2xl">Editar lançamento</DialogTitle></DialogHeader>
+          {edit && (
+            <div className="space-y-4">
+              <div className="space-y-1.5"><Label>Descrição</Label><Input value={edit.descricao} onChange={(e) => setEdit({ ...edit, descricao: e.target.value })} /></div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5"><Label>Data (AAAA-MM-DD)</Label><Input value={edit.data} onChange={(e) => setEdit({ ...edit, data: e.target.value })} placeholder="2026-06-30" /></div>
+                <div className="space-y-1.5"><Label>Valor</Label><Input value={edit.valor} onChange={(e) => setEdit({ ...edit, valor: e.target.value })} placeholder="1234.56" /></div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEdit(null)}>Cancelar</Button>
+            <Button disabled={acting || !edit?.id} onClick={salvarEdicao}>{acting ? "Salvando…" : "Salvar e reconciliar"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
+  );
+}
+
+// Coluna de divergências com seleção (radio) e edição opcional do lançamento.
+function DivergCol({ titulo, linhas, sel, onSel, onEdit }: {
+  titulo: string; linhas: Linha[]; sel: number | null;
+  onSel: (i: number) => void; onEdit?: (l: Linha) => void;
+}) {
+  return (
+    <div className="rounded-xl border border-border">
+      <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-4 py-2.5">
+        <h4 className="font-display text-sm">{titulo}</h4>
+        <span className="ml-auto text-xs text-muted-foreground">{linhas.length}</span>
+      </div>
+      <div className="max-h-72 divide-y divide-border overflow-y-auto">
+        {linhas.map((l, i) => (
+          <div key={i} className={cn("flex items-center gap-3 px-4 py-2.5 text-sm", sel === i && "bg-primary/10")}>
+            <input type="radio" checked={sel === i} onChange={() => onSel(i)} className="h-4 w-4 cursor-pointer accent-[var(--color-primary)]" />
+            <button type="button" onClick={() => onSel(i)} className="flex-1 text-left">
+              <div className="truncate" title={l.descricao}>{l.descricao}</div>
+              <div className="text-xs text-muted-foreground">{l.data ?? "—"}</div>
+            </button>
+            <span className={cn("font-mono text-sm", l.valor < 0 ? "text-destructive" : "text-primary-hover")}>{brl(Math.abs(l.valor))}</span>
+            {onEdit && l.id && (
+              <button type="button" onClick={() => onEdit(l)} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground" title="Editar lançamento">
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+        ))}
+        {linhas.length === 0 && <div className="px-4 py-6 text-center text-xs text-muted-foreground">Sem divergências.</div>}
+      </div>
+    </div>
   );
 }
 
@@ -308,28 +417,3 @@ function Secao({ titulo, icon, children }: { titulo: string; icon: React.ReactNo
   );
 }
 
-function Divergencias({ titulo, linhas }: { titulo: string; linhas: Linha[] }) {
-  return (
-    <Card>
-      <div className="px-6 py-3 border-b border-border bg-muted/40 flex items-center gap-2">
-        <AlertCircle className="h-4 w-4 text-status-back-foreground" /><h3 className="font-display text-base">{titulo}</h3>
-        <span className="ml-auto text-xs text-muted-foreground">{linhas.length}</span>
-      </div>
-      <CardContent className="p-0">
-        <Table>
-          <TableHeader><TableRow><TableHead>Data</TableHead><TableHead>Descrição</TableHead><TableHead className="text-right">Valor</TableHead></TableRow></TableHeader>
-          <TableBody>
-            {linhas.map((l, i) => (
-              <TableRow key={i}>
-                <TableCell className="text-sm">{l.data ?? "—"}</TableCell>
-                <TableCell className="text-sm">{l.descricao}</TableCell>
-                <TableCell className={`text-right font-mono text-sm ${l.valor < 0 ? "text-destructive" : "text-primary-hover"}`}>{brl(l.valor)}</TableCell>
-              </TableRow>
-            ))}
-            {linhas.length === 0 && <TableRow><TableCell colSpan={3} className="text-center text-muted-foreground py-6">Sem divergências.</TableCell></TableRow>}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  );
-}
