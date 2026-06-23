@@ -113,7 +113,6 @@ function ClientesPage() {
             <TableRow>
               <TableHead>Razão Social</TableHead>
               <TableHead>CNPJ</TableHead>
-              <TableHead>Regime</TableHead>
               <TableHead>Consultor</TableHead>
               <TableHead>Status do mês</TableHead>
               <TableHead>Tags</TableHead>
@@ -130,7 +129,6 @@ function ClientesPage() {
                   {e.nome_fantasia ? <div className="text-xs text-muted-foreground">{e.nome_fantasia}</div> : null}
                 </TableCell>
                 <TableCell className="font-mono text-xs">{e.cnpj}</TableCell>
-                <TableCell className="text-sm">{REGIME_LABEL[e.regime]}</TableCell>
                 <TableCell className="text-sm">{e.usuarios_perfil?.nome ?? <span className="text-muted-foreground">—</span>}</TableCell>
                 <TableCell><StatusPill variant={variantFor(e.status)}>{EMPRESA_STATUS_LABEL[e.status]}</StatusPill></TableCell>
                 <TableCell>
@@ -149,7 +147,7 @@ function ClientesPage() {
               </TableRow>
             ))}
             {filtered.length === 0 && (
-              <TableRow><TableCell colSpan={7} className="text-center text-muted-foreground py-8">Nenhum cliente encontrado.</TableCell></TableRow>
+              <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Nenhum cliente encontrado.</TableCell></TableRow>
             )}
           </TableBody>
         </Table>

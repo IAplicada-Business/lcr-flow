@@ -94,17 +94,31 @@ function CxEmpresaPage() {
             <span className="text-xs text-muted-foreground">tendência {hs?.tendencia ?? "—"}</span>
           </div>
         </Card>
-        <Card className="p-5 lg:col-span-2">
-          <div className="mb-3 text-[11px] uppercase text-muted-foreground">Fatores do health score</div>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {Object.entries(fatores).map(([k, v]) => (
-              <div key={k} className="rounded-lg border border-border/70 px-3 py-2">
-                <div className="text-[11px] capitalize text-muted-foreground">{k.replace(/_/g, " ")}</div>
-                <div className="mt-0.5 font-display text-xl">{typeof v === "number" ? (v < 1 && v > 0 ? `${Math.round(v * 100)}%` : v) : String(v)}</div>
-              </div>
-            ))}
-            {Object.keys(fatores).length === 0 && <div className="text-sm text-muted-foreground">Sem fatores calculados.</div>}
-          </div>
+        <Card className="flex flex-col p-5 lg:col-span-2">
+          <div className="mb-4 text-[11px] uppercase text-muted-foreground">Fatores do health score</div>
+          {Object.keys(fatores).length === 0 ? (
+            <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">Sem fatores calculados.</div>
+          ) : (
+            <div className="grid flex-1 content-center grid-cols-1 gap-3 sm:grid-cols-2">
+              {Object.entries(fatores).map(([k, v]) => {
+                const isPct = typeof v === "number" && v > 0 && v < 1;
+                const pct = isPct ? Math.round(v * 100) : null;
+                return (
+                  <div key={k} className="rounded-xl border border-border/70 bg-card/50 p-4">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="text-xs capitalize text-muted-foreground">{k.replace(/_/g, " ")}</div>
+                      <div className="font-display text-2xl leading-none">{isPct ? `${pct}%` : (typeof v === "number" ? v : String(v))}</div>
+                    </div>
+                    {isPct && (
+                      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div className={cn("h-full rounded-full", pct! >= 70 ? "bg-emerald-500" : pct! >= 40 ? "bg-amber-500" : "bg-rose-500")} style={{ width: `${pct}%` }} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
         </Card>
       </div>
 

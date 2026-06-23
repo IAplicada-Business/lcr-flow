@@ -4,13 +4,17 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { Markdown } from "@/components/markdown";
-import { listDocumentos, gerarPlanilhaSci, getHistoricoCerebro, type SciLinha } from "@/lib/lcr.functions";
-import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia } from "@/lib/format";
+import { listDocumentos, gerarPlanilhaSci, getHistoricoCerebro, createDocumento, ensureCompetencia, type SciLinha } from "@/lib/lcr.functions";
+import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
 import { supabase } from "@/integrations/supabase/client";
-import { Sparkles, Loader2, ClipboardCheck, Download, FileSpreadsheet, X } from "lucide-react";
+import { Sparkles, Loader2, ClipboardCheck, Download, FileSpreadsheet, X, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { DocumentoRevisaoView } from "@/routes/_authenticated/revisar.$documentoId";
 
@@ -45,6 +49,10 @@ export function DocumentosTab({ empresaId }: { empresaId: string }) {
 
   return (
     <div className="space-y-5">
+    <div className="flex items-center justify-between">
+      <p className="text-sm text-muted-foreground">{docs.length} documento(s)</p>
+      <UploadDocDialog empresaId={empresaId} />
+    </div>
     <Card>
       <CardContent className="p-0">
         <Table>
@@ -94,6 +102,79 @@ export function DocumentosTab({ empresaId }: { empresaId: string }) {
         </div>
       )}
     </div>
+  );
+}
+
+// Upload manual de documento para ESTE cliente (mesma lógica da tela Documentos:
+// sobe ao bucket, registra o documento e dispara o processamento da IA).
+function UploadDocDialog({ empresaId }: { empresaId: string }) {
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [tipo, setTipo] = useState("extrato");
+  const [competencia, setCompetencia] = useState(competenciaAtual());
+  const [file, setFile] = useState<File | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!file) { toast.error("Selecione um arquivo."); return; }
+    if (!/^\d{4}-\d{2}$/.test(competencia)) { toast.error("Competência no formato AAAA-MM."); return; }
+    setLoading(true);
+    try {
+      const { id: competencia_id } = await ensureCompetencia({ data: { empresa_id: empresaId, competencia } });
+      const safeName = file.name.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${empresaId}/${competencia}/auto/${crypto.randomUUID()}-${safeName}`;
+      const { error: upErr } = await supabase.storage.from("documentos-clientes").upload(path, file, { upsert: false, cacheControl: "3600" });
+      if (upErr) { toast.error(upErr.message); setLoading(false); return; }
+      const doc = await createDocumento({
+        data: {
+          empresa_id: empresaId,
+          tipo: tipo as "extrato",
+          competencia,
+          competencia_id,
+          arquivo_url: path,
+          storage_path: path,
+          arquivo_nome: file.name,
+          arquivo_tamanho_bytes: file.size,
+          mime_type: file.type || "application/pdf",
+        },
+      });
+      qc.invalidateQueries({ queryKey: ["documentos"] });
+      toast.success("Documento enviado. Processando com IA…");
+      setOpen(false); setFile(null);
+      void supabase.functions.invoke("processar-documento", { body: { documento_id: doc.id } }).then(({ data, error }) => {
+        qc.invalidateQueries({ queryKey: ["documentos"] });
+        qc.invalidateQueries({ queryKey: ["lanc-conc"] });
+        const r = data as { ok?: boolean; lancamentos_gerados?: number; error?: string } | null;
+        if (error || !r?.ok) toast.error(r?.error ?? "Falha no processamento IA.");
+        else toast.success(`IA classificou — ${r.lancamentos_gerados ?? 0} lançamento(s) gerado(s).`);
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro");
+    } finally { setLoading(false); }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild><Button><Plus className="mr-1 h-4 w-4" /> Upload manual</Button></DialogTrigger>
+      <DialogContent>
+        <DialogHeader><DialogTitle className="font-display text-2xl">Upload manual</DialogTitle></DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label>Tipo de documento</Label>
+            <Select value={tipo} onValueChange={setTipo}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>{Object.entries(DOC_TIPO_LABEL).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5"><Label>Competência</Label><Input value={competencia} onChange={(e) => setCompetencia(e.target.value)} placeholder="2026-06" /></div>
+            <div className="space-y-1.5"><Label>Arquivo</Label><Input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></div>
+          </div>
+          <DialogFooter><Button type="submit" disabled={loading}>{loading ? "Enviando..." : "Registrar"}</Button></DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
