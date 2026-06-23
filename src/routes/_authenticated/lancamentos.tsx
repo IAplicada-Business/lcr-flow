@@ -1,16 +1,17 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useSuspenseQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { useMemo, useRef, useState } from "react";
 import { PageHeader, ResumoTela } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { listLancamentosAgrupados, gerarPlanilhaSci, registrarPlanilhaSci, type SciLinha } from "@/lib/lcr.functions";
-import { formatCompetencia, LANCAMENTO_STATUS_LABEL } from "@/lib/format";
+import { formatCompetencia, LANCAMENTO_STATUS_LABEL, competenciaAtual, ultimasCompetencias } from "@/lib/format";
 import { Sparkline, serieUltimosDias } from "@/components/sparkline";
 import { supabase } from "@/integrations/supabase/client";
 import { Search, Upload, Download, FileSpreadsheet } from "lucide-react";
@@ -20,7 +21,7 @@ import { requireAcesso } from "@/lib/guard";
 export const Route = createFileRoute("/_authenticated/lancamentos")({
   beforeLoad: ({ context }) => requireAcesso(context.queryClient, "lancamentos", "/lancamentos"),
   head: () => ({ meta: [{ title: "Lançamentos — LCR Contábil" }] }),
-  loader: ({ context }) => context.queryClient.ensureQueryData({ queryKey: ["lancamentos"], queryFn: () => listLancamentosAgrupados() }),
+  loader: ({ context }) => context.queryClient.ensureQueryData({ queryKey: ["lancamentos", competenciaAtual()], queryFn: () => listLancamentosAgrupados({ data: { competencia: competenciaAtual() } }) }),
   component: LancamentosPage,
   errorComponent: ({ error }) => <div className="p-6 text-destructive">Erro: {error.message}</div>,
 });
@@ -112,21 +113,22 @@ function LinhaCliente({ linha, competencia, onGerar }: { linha: Linha; competenc
 
 function LancamentosPage() {
   const qc = useQueryClient();
-  const { data } = useSuspenseQuery({ queryKey: ["lancamentos"], queryFn: () => listLancamentosAgrupados() });
+  const [comp, setComp] = useState(competenciaAtual());
+  const { data } = useQuery({ queryKey: ["lancamentos", comp], queryFn: () => listLancamentosAgrupados({ data: { competencia: comp } }), placeholderData: keepPreviousData });
   const [preview, setPreview] = useState<{ empresa: string; competencia: string; linhas: SciLinha[]; totalLancamentos: number; totalValor: number } | null>(null);
   const [q, setQ] = useState("");
   const [status, setStatus] = useState("all");
 
   const linhas: Linha[] = useMemo(() => {
-    return data.grupos.map((g) => ({
+    return (data?.grupos ?? []).map((g) => ({
       id: g.id,
       razao_social: g.razao_social,
       prontos: g.prontos,
-      ultima: (data.historico as Hist[]).find((h) => h.empresa_id === g.id) ?? null,
+      ultima: ((data?.historico ?? []) as Hist[]).find((h) => h.empresa_id === g.id) ?? null,
     }));
   }, [data]);
 
-  const serieSci = useMemo(() => serieUltimosDias((data.historico as Hist[]).map((h) => h.created_at)), [data.historico]);
+  const serieSci = useMemo(() => serieUltimosDias(((data?.historico ?? []) as Hist[]).map((h) => h.created_at)), [data]);
 
   const filtradas = useMemo(() => linhas.filter((l) => {
     if (q && !l.razao_social.toLowerCase().includes(q.toLowerCase())) return false;
@@ -136,9 +138,11 @@ function LancamentosPage() {
     return true;
   }), [linhas, q, status]);
 
+  if (!data) return null;
+
   async function gerar(empresaId: string, empresaNome: string) {
     try {
-      const res = await gerarPlanilhaSci({ data: { empresa_id: empresaId, competencia: data.competencia } });
+      const res = await gerarPlanilhaSci({ data: { empresa_id: empresaId, competencia: comp } });
       qc.invalidateQueries({ queryKey: ["lancamentos"] });
       if (res.linhas.length === 0) {
         toast.warning("Nenhum lançamento encontrado para esta competência.");
@@ -153,7 +157,18 @@ function LancamentosPage() {
 
   return (
     <>
-      <PageHeader title="Lançamentos contábeis" description={`Competência ${formatCompetencia(data.competencia)} — geração e envio de planilhas SCI.`} />
+      <PageHeader
+        title="Lançamentos contábeis"
+        description="Geração e envio de planilhas SCI."
+        actions={
+          <Select value={comp} onValueChange={setComp}>
+            <SelectTrigger className="w-44"><SelectValue placeholder="Competência" /></SelectTrigger>
+            <SelectContent>
+              {ultimasCompetencias(12).map((c) => <SelectItem key={c} value={c}>{formatCompetencia(c)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        }
+      />
 
       <ResumoTela itens={[
         { label: "Clientes", value: linhas.length },
@@ -194,7 +209,7 @@ function LancamentosPage() {
             <TableRow><TableHead>Cliente</TableHead><TableHead>Docs prontos</TableHead><TableHead>Status</TableHead><TableHead>Lançamentos</TableHead><TableHead>Última planilha</TableHead><TableHead className="text-right">Ações</TableHead></TableRow>
           </TableHeader>
           <TableBody>
-            {filtradas.map((l) => <LinhaCliente key={l.id} linha={l} competencia={data.competencia} onGerar={gerar} />)}
+            {filtradas.map((l) => <LinhaCliente key={l.id} linha={l} competencia={comp} onGerar={gerar} />)}
             {filtradas.length === 0 && <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Nenhum cliente encontrado.</TableCell></TableRow>}
           </TableBody>
         </Table>

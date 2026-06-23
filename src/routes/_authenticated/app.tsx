@@ -1,12 +1,14 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery, keepPreviousData } from "@tanstack/react-query";
+import { useState } from "react";
 import { PageHeader } from "@/components/app-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { ProgressRing } from "@/components/progress-ring";
 import { getDashboardStats } from "@/lib/lcr.functions";
-import { EMPRESA_STATUS_LABEL, formatCompetencia } from "@/lib/format";
+import { EMPRESA_STATUS_LABEL, formatCompetencia, competenciaAtual, ultimasCompetencias } from "@/lib/format";
 import { Building2, FileClock, BookOpen, GitCompare, AlertTriangle, ListTodo, ArrowRight } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, Cell, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { requireAcesso } from "@/lib/guard";
@@ -15,7 +17,7 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/_authenticated/app")({
   beforeLoad: ({ context }) => requireAcesso(context.queryClient, "dashboard", "/app"),
   head: () => ({ meta: [{ title: "Dashboard — LCR Contábil" }] }),
-  loader: ({ context }) => context.queryClient.ensureQueryData({ queryKey: ["dashboard"], queryFn: () => getDashboardStats() }),
+  loader: ({ context }) => context.queryClient.ensureQueryData({ queryKey: ["dashboard", competenciaAtual()], queryFn: () => getDashboardStats({ data: { competencia: competenciaAtual() } }) }),
   component: Dashboard,
   errorComponent: ({ error }) => <div className="p-6 text-destructive">Erro: {error.message}</div>,
 });
@@ -38,7 +40,9 @@ const DOC_BAR_COLORS: Record<string, string> = {
 };
 
 function Dashboard() {
-  const { data } = useSuspenseQuery({ queryKey: ["dashboard"], queryFn: () => getDashboardStats() });
+  const [comp, setComp] = useState(competenciaAtual());
+  const { data } = useQuery({ queryKey: ["dashboard", comp], queryFn: () => getDashboardStats({ data: { competencia: comp } }), placeholderData: keepPreviousData });
+  if (!data) return null;
 
   const stats = [
     { icon: Building2, label: "Clientes ativos", value: data.clientesAtivos, hint: "na carteira LCR" },
@@ -53,7 +57,18 @@ function Dashboard() {
 
   return (
     <>
-      <PageHeader title="Visão geral" description="Integração e conciliação bancária dos clientes." />
+      <PageHeader
+        title="Visão geral"
+        description="Integração e conciliação bancária dos clientes."
+        actions={
+          <Select value={comp} onValueChange={setComp}>
+            <SelectTrigger className="w-44"><SelectValue placeholder="Competência" /></SelectTrigger>
+            <SelectContent>
+              {ultimasCompetencias(12).map((c) => <SelectItem key={c} value={c}>{formatCompetencia(c)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        }
+      />
 
       {/* KPIs — primeiro é hero (accent sólido da marca), demais neutros */}
       <div className="mb-6 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
