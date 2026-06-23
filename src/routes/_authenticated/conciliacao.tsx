@@ -13,6 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { Upload, Download } from "lucide-react";
 import { toast } from "sonner";
 import { requireAcesso } from "@/lib/guard";
+import { Sparkline, serieUltimosDias } from "@/components/sparkline";
 
 export const Route = createFileRoute("/_authenticated/conciliacao")({
   beforeLoad: ({ context }) => requireAcesso(context.queryClient, "conciliacao", "/conciliacao"),
@@ -22,7 +23,7 @@ export const Route = createFileRoute("/_authenticated/conciliacao")({
   errorComponent: ({ error }) => <div className="p-6 text-destructive">Erro: {error.message}</div>,
 });
 
-type ConcRow = { id: string; competencia: string; status: string; divergencias_count: number; razao_csv_url: string | null; planilha_conciliacao_url: string | null };
+type ConcRow = { id: string; competencia: string; status: string; divergencias_count: number; created_at?: string | null; razao_csv_url: string | null; planilha_conciliacao_url: string | null };
 type EmpRow = { id: string; razao_social: string; conciliacoes: ConcRow[] };
 
 async function baixar(path: string) {
@@ -91,6 +92,7 @@ function ConciliacaoPage() {
   const statusDe = (e: EmpRow) => (e.conciliacoes.find((c) => c.competencia === data.competencia) ?? e.conciliacoes[0])?.status ?? "nao_iniciada";
   const empresas = data.empresas as EmpRow[];
   const filtradas = status === "all" ? empresas : empresas.filter((e) => statusDe(e) === status);
+  const serieConc = serieUltimosDias(empresas.flatMap((e) => e.conciliacoes.map((c) => c.created_at)));
 
   return (
     <>
@@ -106,6 +108,14 @@ function ConciliacaoPage() {
         { label: "Divergências", value: empresas.filter((e) => statusDe(e) === "divergencias").length, tone: "warn" as const },
         { label: "Não iniciadas", value: empresas.filter((e) => statusDe(e) === "nao_iniciada").length },
       ]} />
+
+      <Card className="mb-6 p-5">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="label-cat">Atividade de conciliação · últimos 14 dias</span>
+          <span className="text-sm font-semibold">{serieConc.reduce((s, d) => s + d.v, 0)}</span>
+        </div>
+        <Sparkline data={serieConc} id="spark-conc" />
+      </Card>
 
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">

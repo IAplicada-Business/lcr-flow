@@ -107,10 +107,10 @@ export const getNotificacoes = createServerFn({ method: "GET" })
       context.supabase.from("conciliacoes").select("id", { count: "exact", head: true }).eq("status", "divergencias"),
       context.supabase.from("tarefas").select("id", { count: "exact", head: true }).lt("prazo", hoje).not("status", "in", "(done,concluida)"),
     ]);
-    const items: { tipo: string; titulo: string; to: string }[] = [];
-    if (docs.count) items.push({ tipo: "documentos", titulo: `${docs.count} documento(s) aguardando classificação`, to: "/documentos" });
-    if (diverg.count) items.push({ tipo: "conciliacao", titulo: `${diverg.count} conciliação(ões) com divergências`, to: "/conciliacao" });
-    if (tarefas.count) items.push({ tipo: "tarefas", titulo: `${tarefas.count} tarefa(s) em atraso`, to: "/tarefas" });
+    const items: { tipo: string; titulo: string; to: string; count: number }[] = [];
+    if (docs.count) items.push({ tipo: "documentos", titulo: `${docs.count} documento(s) aguardando classificação`, to: "/documentos", count: docs.count });
+    if (diverg.count) items.push({ tipo: "conciliacao", titulo: `${diverg.count} conciliação(ões) com divergências`, to: "/conciliacao", count: diverg.count });
+    if (tarefas.count) items.push({ tipo: "tarefas", titulo: `${tarefas.count} tarefa(s) em atraso`, to: "/tarefas", count: tarefas.count });
     return { items, total: items.length };
   });
 
@@ -415,7 +415,7 @@ export const listConciliacoes = createServerFn({ method: "GET" })
     const competencia = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
     const { data, error } = await context.supabase
       .from("empresas")
-      .select("id, razao_social, conciliacoes(id, competencia, status, divergencias_count, concluido_em, razao_csv_url, extrato_csv_url, planilha_conciliacao_url)")
+      .select("id, razao_social, conciliacoes(id, competencia, status, divergencias_count, concluido_em, created_at, razao_csv_url, extrato_csv_url, planilha_conciliacao_url)")
       .order("razao_social");
     if (error) throw new Error(error.message);
     return { competencia, empresas: data ?? [] };
@@ -870,7 +870,19 @@ export const getCxCarteira = createServerFn({ method: "GET" })
       const e = h.empresas as { razao_social?: string; nome_fantasia?: string } | null;
       return { id: h.empresa_id, nome: e?.nome_fantasia ?? e?.razao_social ?? "—", score: h.score, classificacao: h.classificacao, tendencia: h.tendencia };
     });
-    return { mediaHealth, dist, npsTrend, atencao, total: (health ?? []).length };
+    // NPS do período mais recente: promotores/neutros/detratores + NPS
+    const ultimoPeriodo = Array.from(byPeriodo.keys()).sort().slice(-1)[0];
+    let promotores = 0, neutros = 0, detratores = 0;
+    (nps ?? []).forEach((r) => {
+      if (r.periodo !== ultimoPeriodo) return;
+      if (r.score >= 9) promotores++; else if (r.score <= 6) detratores++; else neutros++;
+    });
+    const totalNps = promotores + neutros + detratores;
+    const npsAtual = totalNps ? Math.round(((promotores - detratores) / totalNps) * 100) : 0;
+    const npsResumo = { promotores, neutros, detratores, npsAtual, tendencia: (health ?? []).filter((h) => h.tendencia === "subindo").length };
+    const subindo = (health ?? []).filter((h) => h.tendencia === "subindo").length;
+    const caindo = (health ?? []).filter((h) => h.tendencia === "caindo").length;
+    return { mediaHealth, dist, npsTrend, atencao, total: (health ?? []).length, npsResumo, subindo, caindo };
   });
 
 export const getCxEmpresa = createServerFn({ method: "GET" })

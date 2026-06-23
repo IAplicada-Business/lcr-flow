@@ -1,5 +1,5 @@
 import { Link, useRouter, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Building2, FileText, BookOpen, GitCompare, ListChecks, Settings, LogOut, PanelLeftClose, PanelLeftOpen, Brain, LineChart, HeartHandshake, Plug, Users, ListTree, ChevronDown, Bell, UserPen, Camera, History, type LucideIcon } from "lucide-react";
+import { LayoutDashboard, Building2, FileText, BookOpen, GitCompare, ListChecks, Settings, LogOut, PanelLeftClose, PanelLeftOpen, Brain, LineChart, HeartHandshake, Plug, Users, ListTree, ChevronDown, Bell, UserPen, Camera, History, Check, type LucideIcon } from "lucide-react";
 import { LcrLogo } from "./brand";
 import { supabase } from "@/integrations/supabase/client";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
@@ -156,6 +156,12 @@ function TopBar({ userName, userRole, userAvatar, collapsed, onToggle, onSignOut
   const [perfilOpen, setPerfilOpen] = useState(false);
   const { data: notif } = useQuery({ queryKey: ["notificacoes"], queryFn: () => getNotificacoes(), staleTime: 60_000 });
   const notifItems = notif?.items ?? [];
+  const [lidas, setLidas] = useState<Record<string, number>>({});
+  useEffect(() => { try { setLidas(JSON.parse(localStorage.getItem("lcr-notif-lidas") || "{}")); } catch { /* noop */ } }, []);
+  const persistLidas = (d: Record<string, number>) => { setLidas(d); localStorage.setItem("lcr-notif-lidas", JSON.stringify(d)); };
+  const visiveis = notifItems.filter((n) => lidas[n.tipo] !== n.count);
+  const marcarLida = (tipo: string, count: number) => persistLidas({ ...lidas, [tipo]: count });
+  const marcarTodas = () => persistLidas(Object.fromEntries(notifItems.map((n) => [n.tipo, n.count])));
   useEffect(() => {
     let last = window.scrollY;
     const onScroll = () => {
@@ -188,22 +194,30 @@ function TopBar({ userName, userRole, userAvatar, collapsed, onToggle, onSignOut
           <DropdownMenuTrigger asChild>
             <button className="relative flex h-10 w-10 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-card hover:text-foreground" aria-label="Notificações">
               <Bell className="h-5 w-5" />
-              {notifItems.length > 0 && <span className="absolute right-2 top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-bold text-destructive-foreground">{notifItems.length}</span>}
+              {visiveis.length > 0 && <span className="absolute right-2 top-2 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[9px] font-bold text-destructive-foreground">{visiveis.length}</span>}
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-80">
-            <DropdownMenuLabel>Notificações</DropdownMenuLabel>
+            <div className="flex items-center justify-between px-2 py-1.5">
+              <DropdownMenuLabel className="p-0">Notificações</DropdownMenuLabel>
+              {visiveis.length > 0 && <button onClick={marcarTodas} className="text-[11px] font-medium text-primary hover:underline">Marcar todas como lidas</button>}
+            </div>
             <DropdownMenuSeparator />
-            {notifItems.length === 0 ? (
+            {visiveis.length === 0 ? (
               <div className="px-2 py-6 text-center text-sm text-muted-foreground">Sem novas notificações.</div>
             ) : (
-              notifItems.map((n) => (
-                <DropdownMenuItem key={n.tipo} asChild>
-                  <Link to={n.to as "/documentos"} className="flex items-start gap-2">
-                    <Bell className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                    <span className="text-sm">{n.titulo}</span>
-                  </Link>
-                </DropdownMenuItem>
+              visiveis.map((n) => (
+                <div key={n.tipo} className="flex items-start gap-1 px-1">
+                  <DropdownMenuItem asChild className="flex-1">
+                    <Link to={n.to as "/documentos"} className="flex items-start gap-2">
+                      <Bell className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                      <span className="text-sm">{n.titulo}</span>
+                    </Link>
+                  </DropdownMenuItem>
+                  <button onClick={(e) => { e.preventDefault(); e.stopPropagation(); marcarLida(n.tipo, n.count); }} className="mt-1 rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground" title="Marcar como lida" aria-label="Marcar como lida">
+                    <Check className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               ))
             )}
           </DropdownMenuContent>

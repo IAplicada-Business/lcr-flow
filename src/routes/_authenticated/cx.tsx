@@ -32,6 +32,8 @@ function CxPage() {
     { name: "Atenção", key: "atencao", value: data.dist.atencao },
     { name: "Risco", key: "risco", value: data.dist.risco },
   ];
+  const totalNps = data.npsResumo.promotores + data.npsResumo.neutros + data.npsResumo.detratores;
+  const pctNps = (n: number) => (totalNps ? (n / totalNps) * 100 : 0);
 
   return (
     <>
@@ -39,11 +41,35 @@ function CxPage() {
 
       <ResumoTela itens={[
         { label: "Health médio", value: data.mediaHealth },
+        { label: "NPS atual", value: data.npsResumo.npsAtual, tone: data.npsResumo.npsAtual >= 0 ? "ok" as const : "warn" as const },
         { label: "Saudáveis", value: data.dist.saudavel, tone: "ok" as const },
         { label: "Em atenção", value: data.dist.atencao },
         { label: "Em risco", value: data.dist.risco, tone: "warn" as const },
-        { label: "Clientes", value: data.total },
       ]} />
+
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Card className="p-4">
+          <div className="label-cat">Composição do NPS · último período</div>
+          <div className="mt-3 flex h-3 overflow-hidden rounded-full bg-muted">
+            <div className="bg-emerald-500" style={{ width: `${pctNps(data.npsResumo.promotores)}%` }} />
+            <div className="bg-amber-400" style={{ width: `${pctNps(data.npsResumo.neutros)}%` }} />
+            <div className="bg-rose-500" style={{ width: `${pctNps(data.npsResumo.detratores)}%` }} />
+          </div>
+          <div className="mt-2 flex justify-between text-xs text-muted-foreground">
+            <span className="text-emerald-600">{data.npsResumo.promotores} promotores</span>
+            <span>{data.npsResumo.neutros} neutros</span>
+            <span className="text-rose-600">{data.npsResumo.detratores} detratores</span>
+          </div>
+        </Card>
+        <Card className="flex items-center justify-between p-4">
+          <div><div className="label-cat">Carteira subindo</div><div className="mt-1 font-display text-3xl text-emerald-600">{data.subindo}</div></div>
+          <TrendingUp className="h-6 w-6 text-emerald-500" />
+        </Card>
+        <Card className="flex items-center justify-between p-4">
+          <div><div className="label-cat">Carteira caindo</div><div className="mt-1 font-display text-3xl text-rose-600">{data.caindo}</div></div>
+          <TrendingDown className="h-6 w-6 text-rose-500" />
+        </Card>
+      </div>
 
       <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card className="p-5">

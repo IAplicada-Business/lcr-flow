@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { listLancamentosAgrupados, gerarPlanilhaSci, registrarPlanilhaSci, type SciLinha } from "@/lib/lcr.functions";
 import { formatCompetencia, LANCAMENTO_STATUS_LABEL } from "@/lib/format";
+import { Sparkline, serieUltimosDias } from "@/components/sparkline";
 import { supabase } from "@/integrations/supabase/client";
 import { Search, Upload, Download, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
@@ -125,6 +126,8 @@ function LancamentosPage() {
     }));
   }, [data]);
 
+  const serieSci = useMemo(() => serieUltimosDias((data.historico as Hist[]).map((h) => h.created_at)), [data.historico]);
+
   const filtradas = useMemo(() => linhas.filter((l) => {
     if (q && !l.razao_social.toLowerCase().includes(q.toLowerCase())) return false;
     if (status === "sem") return !l.ultima;
@@ -158,6 +161,14 @@ function LancamentosPage() {
         { label: "Com planilha", value: linhas.filter((l) => l.ultima).length, tone: "ok" as const },
         { label: "Sem planilha", value: linhas.filter((l) => !l.ultima).length, tone: "warn" as const },
       ]} />
+
+      <Card className="mb-6 p-5">
+        <div className="mb-1 flex items-center justify-between">
+          <span className="label-cat">Planilhas geradas · últimos 14 dias</span>
+          <span className="text-sm font-semibold">{serieSci.reduce((s, d) => s + d.v, 0)}</span>
+        </div>
+        <Sparkline data={serieSci} id="spark-sci" />
+      </Card>
 
       <Card>
         <div className="space-y-3 border-b border-border p-4">
