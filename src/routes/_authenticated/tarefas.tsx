@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useSuspenseQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
-import { PageHeader } from "@/components/app-shell";
+import { PageHeader, ResumoTela } from "@/components/app-shell";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { DndContext, useDraggable, useDroppable, type DragEndEvent, PointerSensor, useSensor, useSensors } from "@dnd-kit/core";
@@ -106,6 +106,14 @@ function TarefasPage() {
           </>
         }
       />
+
+      <ResumoTela itens={[
+        { label: "Total", value: filtered.length },
+        { label: "A fazer", value: filtered.filter((t) => STATUS_COL[t.status] === "now").length },
+        { label: "Em andamento", value: filtered.filter((t) => STATUS_COL[t.status] === "doing").length },
+        { label: "Atrasadas", value: filtered.filter((t) => t.prazo && new Date(t.prazo) < new Date(new Date().toDateString()) && STATUS_COL[t.status] !== "done").length, tone: "warn" as const },
+        { label: "Concluídas", value: filtered.filter((t) => STATUS_COL[t.status] === "done").length, tone: "ok" as const },
+      ]} />
 
       <Tabs value={tipoAba} onValueChange={(v) => setTipoAba(v as "all" | TipoGrupo)} className="mb-5">
         <TabsList>
