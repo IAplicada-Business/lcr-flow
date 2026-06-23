@@ -116,6 +116,53 @@ Deno.serve(async (req) => {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const ext = (doc.arquivo_nome ?? path).split(".").pop()?.toLowerCase() ?? "";
 
+  // ---- Trilho EXTRATO BANCÁRIO ---------------------------------------
+  // Extrato não gera razão (evita razão = extrato e divergências artificiais).
+  // O arquivo é espelhado no bucket `conciliacoes` e vinculado como
+  // extrato_csv_url da conciliação dessa empresa/competência, deixando-a
+  // pronta para o "Conciliar agora".
+  if (doc.tipo === "extrato") {
+    const competenciaExtrato = doc.competencia ?? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const safeName = (doc.arquivo_nome ?? "extrato").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+    const concPath = `${doc.empresa_id}/${competenciaExtrato}/extrato-${crypto.randomUUID()}-${safeName}`;
+    const { error: upErr } = await admin.storage.from("conciliacoes").upload(concPath, bytes, { upsert: false, cacheControl: "3600", contentType: file.type || "text/csv" });
+    if (upErr) return markErro(`Falha ao vincular extrato à conciliação: ${upErr.message}`);
+
+    // garante a conciliação (empresa/competência) e vincula o extrato
+    let concId: string | null = null;
+    const { data: existente } = await admin
+      .from("conciliacoes")
+      .select("id")
+      .eq("empresa_id", doc.empresa_id)
+      .eq("competencia", competenciaExtrato)
+      .maybeSingle();
+    if (existente) {
+      concId = existente.id;
+      await admin.from("conciliacoes").update({ extrato_csv_url: concPath, status: "em_andamento" }).eq("id", concId);
+    } else {
+      const { data: nova, error: cErr } = await admin
+        .from("conciliacoes")
+        .insert({ empresa_id: doc.empresa_id, competencia: competenciaExtrato, extrato_csv_url: concPath, status: "em_andamento" })
+        .select("id").single();
+      if (cErr) return markErro(`Falha ao criar conciliação: ${cErr.message}`);
+      concId = nova.id;
+    }
+
+    await admin.from("documentos").update({
+      status: "processado",
+      status_processamento: "classificado",
+      classificacao_ia: {
+        tipo_documento: "extrato_bancario",
+        competencia: competenciaExtrato,
+        observacoes: "Extrato vinculado à Conciliação bancária da competência. Use 'Conciliar agora' na aba Conciliação.",
+      },
+      processado_em: new Date().toISOString(),
+      lancamentos_gerados: 0,
+    }).eq("id", documento_id);
+
+    return json(200, { ok: true, vinculado_conciliacao_id: concId, lancamentos_gerados: 0 });
+  }
+
   let contentBlock: Record<string, unknown>;
   if (ext === "pdf") contentBlock = { type: "document", source: { type: "base64", media_type: "application/pdf", data: toBase64(bytes) } };
   else if (IMG[ext]) contentBlock = { type: "image", source: { type: "base64", media_type: IMG[ext], data: toBase64(bytes) } };
