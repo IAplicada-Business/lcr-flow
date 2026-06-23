@@ -102,6 +102,52 @@ export const listEmpresas = createServerFn({ method: "GET" })
     return data ?? [];
   });
 
+// Paginação + busca server-side da carteira (escala pra 902+ clientes).
+export const listEmpresasPaginadas = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      q: z.string().max(120).optional(),
+      status: z.string().max(20).optional(),
+      page: z.number().int().min(1).default(1),
+      pageSize: z.number().int().min(10).max(200).default(50),
+    }).parse(d ?? {}),
+  )
+  .handler(async ({ context, data }) => {
+    const from = (data.page - 1) * data.pageSize;
+    const to = from + data.pageSize - 1;
+    let q = context.supabase
+      .from("empresas")
+      .select("id, razao_social, nome_fantasia, cnpj, regime, segmento, status, tags, consultor_id, usuarios_perfil:consultor_id(nome)", { count: "exact" })
+      .order("razao_social")
+      .range(from, to);
+    if (data.q && data.q.trim()) {
+      const term = `%${data.q.trim()}%`;
+      q = q.or(`razao_social.ilike.${term},nome_fantasia.ilike.${term},cnpj.ilike.${term}`);
+    }
+    if (data.status && data.status !== "all") q = q.eq("status", data.status as never);
+    const { data: items, count, error } = await q;
+    if (error) throw new Error(error.message);
+    return { items: items ?? [], total: count ?? 0, page: data.page, pageSize: data.pageSize };
+  });
+
+// Resumo agregado da carteira (rápido, independente da página visível).
+export const getEmpresasResumo = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const { data, error } = await context.supabase.from("empresas").select("status").eq("ativo", true);
+    if (error) throw new Error(error.message);
+    const total = (data ?? []).length;
+    const by = (s: string) => (data ?? []).filter((e) => e.status === s).length;
+    return {
+      total,
+      em_dia: by("em_dia"),
+      cobranca: by("cobranca"),
+      atrasado: by("atrasado"),
+      entregue: by("entregue"),
+    };
+  });
+
 // Notificações reais para o sino da topbar: docs pendentes, conciliações com
 // divergência, tarefas em atraso.
 export const getNotificacoes = createServerFn({ method: "GET" })

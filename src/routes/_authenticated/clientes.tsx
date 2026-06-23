@@ -1,5 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useSuspenseQuery, useQueryClient } from "@tanstack/react-query";
+import { useSuspenseQuery, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { useEffect, useMemo, useState } from "react";
 import { PageHeader, ResumoTela } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
@@ -11,9 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Trash2, Search, Pencil } from "lucide-react";
+import { Plus, Trash2, Search, Pencil, ChevronLeft, ChevronRight } from "lucide-react";
 import { StatusPill, variantFor } from "@/components/status-pill";
-import { listEmpresas, listConsultores, createEmpresa, updateEmpresa, deleteEmpresa } from "@/lib/lcr.functions";
+import { listEmpresasPaginadas, getEmpresasResumo, listConsultores, createEmpresa, updateEmpresa, deleteEmpresa } from "@/lib/lcr.functions";
 import { REGIME_LABEL, EMPRESA_STATUS_LABEL, DOC_TIPO_LABEL, formatCNPJ } from "@/lib/format";
 import { toast } from "sonner";
 import { requireAcesso } from "@/lib/guard";
@@ -23,7 +23,7 @@ export const Route = createFileRoute("/_authenticated/clientes")({
   head: () => ({ meta: [{ title: "Clientes — LCR Contábil" }] }),
   loader: async ({ context }) => {
     await Promise.all([
-      context.queryClient.ensureQueryData({ queryKey: ["empresas"], queryFn: () => listEmpresas() }),
+      context.queryClient.ensureQueryData({ queryKey: ["empresas-resumo"], queryFn: () => getEmpresasResumo() }),
       context.queryClient.ensureQueryData({ queryKey: ["consultores"], queryFn: () => listConsultores() }),
     ]);
   },
@@ -31,39 +31,57 @@ export const Route = createFileRoute("/_authenticated/clientes")({
   errorComponent: ({ error }) => <div className="p-6 text-destructive">Erro: {error.message}</div>,
 });
 
+// Debounce simples para a busca (evita 1 request por tecla com 902+ clientes).
+function useDebouncedValue<T>(value: T, ms = 300): T {
+  const [debounced, setDebounced] = useState(value);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), ms);
+    return () => clearTimeout(t);
+  }, [value, ms]);
+  return debounced;
+}
+
 function ClientesPage() {
   const qc = useQueryClient();
-  const { data: empresas } = useSuspenseQuery({ queryKey: ["empresas"], queryFn: () => listEmpresas() });
+  const { data: resumoServer } = useSuspenseQuery({ queryKey: ["empresas-resumo"], queryFn: () => getEmpresasResumo() });
   const { data: consultores } = useSuspenseQuery({ queryKey: ["consultores"], queryFn: () => listConsultores() });
   const [q, setQ] = useState("");
+  const qDebounced = useDebouncedValue(q, 300);
   const [regime, setRegime] = useState<string>("all");
   const [status, setStatus] = useState<string>("all");
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
   const [open, setOpen] = useState(false);
 
-  const filtered = useMemo(() => {
-    return empresas.filter((e) => {
-      if (regime !== "all" && e.regime !== regime) return false;
-      if (status !== "all" && e.status !== status) return false;
-      if (q && !e.razao_social.toLowerCase().includes(q.toLowerCase())) return false;
-      return true;
-    });
-  }, [empresas, q, regime, status]);
+  useEffect(() => { setPage(1); }, [qDebounced, status, regime]);
 
-  const resumo = useMemo(() => {
-    const by = (s: string) => empresas.filter((e) => e.status === s).length;
-    return [
-      { label: "Clientes", value: empresas.length },
-      { label: "Em dia", value: by("em_dia"), tone: "ok" as const },
-      { label: "Em cobrança", value: by("cobranca") },
-      { label: "Atrasados", value: by("atrasado"), tone: "warn" as const },
-      { label: "Entregues", value: by("entregue"), tone: "ok" as const },
-    ];
-  }, [empresas]);
+  const { data: pageData, isFetching } = useQuery({
+    queryKey: ["empresas-paginadas", qDebounced, status, page],
+    queryFn: () => listEmpresasPaginadas({ data: { q: qDebounced || undefined, status: status === "all" ? undefined : status, page, pageSize } }),
+    placeholderData: keepPreviousData,
+  });
+
+  // Regime filtra no cliente (não está indexado, e a maioria está NULL hoje).
+  const items = (pageData?.items ?? []).filter((e) => regime === "all" || e.regime === regime);
+  const total = pageData?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  const resumo = useMemo(() => ([
+    { label: "Clientes", value: resumoServer.total },
+    { label: "Em dia", value: resumoServer.em_dia, tone: "ok" as const },
+    { label: "Em cobrança", value: resumoServer.cobranca },
+    { label: "Atrasados", value: resumoServer.atrasado, tone: "warn" as const },
+    { label: "Entregues", value: resumoServer.entregue, tone: "ok" as const },
+  ]), [resumoServer]);
 
   async function excluir(e: { id: string; razao_social: string }) {
     if (!confirm(`Excluir ${e.razao_social}? Remove também contas, documentos e tarefas vinculadas.`)) return;
-    try { await deleteEmpresa({ data: { id: e.id } }); toast.success("Cliente excluído."); qc.invalidateQueries({ queryKey: ["empresas"] }); }
-    catch (err) { toast.error(err instanceof Error ? err.message : "Erro ao excluir"); }
+    try {
+      await deleteEmpresa({ data: { id: e.id } });
+      toast.success("Cliente excluído.");
+      qc.invalidateQueries({ queryKey: ["empresas-paginadas"] });
+      qc.invalidateQueries({ queryKey: ["empresas-resumo"] });
+    } catch (err) { toast.error(err instanceof Error ? err.message : "Erro ao excluir"); }
   }
 
   return (
@@ -106,7 +124,7 @@ function ClientesPage() {
               </SelectContent>
             </Select>
           </div>
-          <div className="text-sm text-muted-foreground">{filtered.length} cliente(s)</div>
+          <div className="text-sm text-muted-foreground">{total} cliente(s){isFetching && q !== qDebounced ? " · buscando…" : ""}</div>
         </div>
         <Table>
           <TableHeader>
@@ -120,7 +138,7 @@ function ClientesPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {filtered.map((e) => (
+            {items.map((e) => (
               <TableRow key={e.id} className="hover:bg-muted/50">
                 <TableCell>
                   <Link to="/clientes/$id" params={{ id: e.id }} className="font-medium text-foreground hover:text-primary">
@@ -128,7 +146,7 @@ function ClientesPage() {
                   </Link>
                   {e.nome_fantasia ? <div className="text-xs text-muted-foreground">{e.nome_fantasia}</div> : null}
                 </TableCell>
-                <TableCell className="font-mono text-xs">{e.cnpj}</TableCell>
+                <TableCell className="font-mono text-xs">{e.cnpj ?? <span className="text-muted-foreground">—</span>}</TableCell>
                 <TableCell className="text-sm">{e.usuarios_perfil?.nome ?? <span className="text-muted-foreground">—</span>}</TableCell>
                 <TableCell><StatusPill variant={variantFor(e.status)}>{EMPRESA_STATUS_LABEL[e.status]}</StatusPill></TableCell>
                 <TableCell>
@@ -146,11 +164,22 @@ function ClientesPage() {
                 </TableCell>
               </TableRow>
             ))}
-            {filtered.length === 0 && (
-              <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">Nenhum cliente encontrado.</TableCell></TableRow>
+            {items.length === 0 && (
+              <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">{isFetching ? "Carregando…" : "Nenhum cliente encontrado."}</TableCell></TableRow>
             )}
           </TableBody>
         </Table>
+        <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
+          <div className="text-muted-foreground">Página {page} de {totalPages} · {total} cliente(s)</div>
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="sm" disabled={page <= 1 || isFetching} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+              <ChevronLeft className="h-4 w-4" /> Anterior
+            </Button>
+            <Button variant="outline" size="sm" disabled={page >= totalPages || isFetching} onClick={() => setPage((p) => Math.min(totalPages, p + 1))}>
+              Próxima <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
       </Card>
     </>
   );
@@ -191,7 +220,7 @@ function NovoClienteDialog({ consultores, onSuccess }: { consultores: { id: stri
         },
       });
       toast.success("Cliente cadastrado.");
-      qc.invalidateQueries({ queryKey: ["empresas"] });
+      qc.invalidateQueries({ queryKey: ["empresas-paginadas"] }); qc.invalidateQueries({ queryKey: ["empresas-resumo"] });
       onSuccess();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao cadastrar");
@@ -323,7 +352,7 @@ function EditarClienteDialog({ empresa, consultores }: { empresa: EmpresaEdit; c
         },
       });
       toast.success("Cliente atualizado.");
-      qc.invalidateQueries({ queryKey: ["empresas"] });
+      qc.invalidateQueries({ queryKey: ["empresas-paginadas"] }); qc.invalidateQueries({ queryKey: ["empresas-resumo"] });
       setOpen(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao salvar");
