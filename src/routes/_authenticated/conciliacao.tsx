@@ -5,6 +5,7 @@ import { PageHeader, ResumoTela } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { listConciliacoes, ensureConciliacao, setConciliacaoRazaoCsv } from "@/lib/lcr.functions";
 import { CONCILIACAO_STATUS_LABEL, formatCompetencia } from "@/lib/format";
@@ -85,9 +86,11 @@ function EmpresaRow({ empresa, competencia }: { empresa: EmpRow; competencia: st
 
 function ConciliacaoPage() {
   const { data } = useSuspenseQuery({ queryKey: ["conciliacoes"], queryFn: () => listConciliacoes() });
+  const [status, setStatus] = useState("all");
 
   const statusDe = (e: EmpRow) => (e.conciliacoes.find((c) => c.competencia === data.competencia) ?? e.conciliacoes[0])?.status ?? "nao_iniciada";
   const empresas = data.empresas as EmpRow[];
+  const filtradas = status === "all" ? empresas : empresas.filter((e) => statusDe(e) === status);
 
   return (
     <>
@@ -105,14 +108,24 @@ function ConciliacaoPage() {
       ]} />
 
       <Card>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
+          <Tabs value={status} onValueChange={setStatus}>
+            <TabsList className="flex-wrap">
+              <TabsTrigger value="all">Todas</TabsTrigger>
+              {Object.entries(CONCILIACAO_STATUS_LABEL).map(([k, v]) => <TabsTrigger key={k} value={k}>{v}</TabsTrigger>)}
+            </TabsList>
+          </Tabs>
+          <span className="text-sm text-muted-foreground">{filtradas.length} cliente(s)</span>
+        </div>
         <Table>
           <TableHeader>
             <TableRow><TableHead>Cliente</TableHead><TableHead>Competência</TableHead><TableHead>Status</TableHead><TableHead>Divergências</TableHead><TableHead></TableHead></TableRow>
           </TableHeader>
           <TableBody>
-            {data.empresas.map((e) => (
-              <EmpresaRow key={e.id} empresa={e as EmpRow} competencia={data.competencia} />
+            {filtradas.map((e) => (
+              <EmpresaRow key={e.id} empresa={e} competencia={data.competencia} />
             ))}
+            {filtradas.length === 0 && <TableRow><TableCell colSpan={5} className="py-8 text-center text-muted-foreground">Nenhuma conciliação neste status.</TableCell></TableRow>}
           </TableBody>
         </Table>
       </Card>

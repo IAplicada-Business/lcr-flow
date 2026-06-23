@@ -5,7 +5,7 @@ import { PageHeader, ResumoTela } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusPill, variantFor } from "@/components/status-pill";
@@ -160,21 +160,22 @@ function LancamentosPage() {
       ]} />
 
       <Card>
-        <div className="p-4 border-b border-border grid grid-cols-1 md:grid-cols-4 gap-3">
-          <div className="relative md:col-span-2">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar cliente" className="pl-8" />
+        <div className="space-y-3 border-b border-border p-4">
+          <Tabs value={status} onValueChange={setStatus}>
+            <TabsList className="flex-wrap">
+              <TabsTrigger value="all">Todos</TabsTrigger>
+              <TabsTrigger value="prontos">Docs prontos</TabsTrigger>
+              <TabsTrigger value="sem">Sem planilha</TabsTrigger>
+              {Object.entries(LANCAMENTO_STATUS_LABEL).map(([k, v]) => <TabsTrigger key={k} value={k}>{v}</TabsTrigger>)}
+            </TabsList>
+          </Tabs>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div className="relative">
+              <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+              <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Buscar cliente" className="pl-8" />
+            </div>
+            <div className="self-center text-sm text-muted-foreground md:justify-self-end">{filtradas.length} cliente(s)</div>
           </div>
-          <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger><SelectValue placeholder="Status" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Todos os status</SelectItem>
-              <SelectItem value="prontos">Com documentos prontos</SelectItem>
-              <SelectItem value="sem">Sem planilha</SelectItem>
-              {Object.entries(LANCAMENTO_STATUS_LABEL).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}
-            </SelectContent>
-          </Select>
-          <div className="text-sm text-muted-foreground self-center justify-self-end">{filtradas.length} cliente(s)</div>
         </div>
 
         <Table>
