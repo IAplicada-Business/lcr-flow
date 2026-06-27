@@ -1,0 +1,19 @@
+FROM mcr.microsoft.com/playwright:v1.44.0-jammy
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    python3 python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package*.json ./
+RUN npm install
+
+COPY requirements.txt ./
+RUN pip3 install -r requirements.txt --break-system-packages
+
+COPY src/ ./src/
+
+EXPOSE 3000
+
+CMD ["node", "src/server.js"]

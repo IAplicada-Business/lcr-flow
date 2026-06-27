@@ -1,0 +1,33 @@
+{
+  "name": "lcr-flow",
+  "version": "1.0.0",
+  "description": "Automação de integração e conciliação bancária — LCR Contadores",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "save-session:gestta": "node src/gestta/saveSession.js",
+    "save-session:sci": "node src/sci/saveSession.js",
+    "save-session:leveldrive": "node src/sci/saveLevelDriveSession.js",
+    "calibrar:sci": "node src/sci/calibrar_sci.js",
+    "gravar:sci": "node src/sci/gravar_sci.js",
+    "mapear:sci": "node src/sci/mapear_coordenadas.js",
+    "importar:sci": "node src/sci/importar_canvas.js",
+    "test:leveldrive": "node src/sci/testar_leveldrive.js",
+    "test:leveldrive:upload": "node src/sci/testar_leveldrive.js --upload",
+    "test:parser": "python3 src/parsers/test_parsers.py",
+    "test:motor-ia": "python3 src/ai/test_motor.py"
+  },
+  "dependencies": {
+    "playwright": "^1.44.0",
+    "playwright-extra": "^4.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
+    "express": "^4.18.2",
+    "dotenv": "^16.4.5",
+    "@supabase/supabase-js": "^2.43.1",
+    "axios": "^1.6.8"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}

@@ -1,0 +1,30 @@
+# Repo frontend clonado dentro do projeto (não faz parte deste repo)
+lcr-flow/
+
+# Node
+node_modules/
+npm-debug.log*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Outputs e dados gerados
+outputs/
+sessions/
+screenshots/
+planilhas/
+
+# Chrome profile (local)
+profiles/
+
+# Secrets
+.env
+*.env.local
+
+# OS
+.DS_Store
+Thumbs.db
