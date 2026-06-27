@@ -212,10 +212,7 @@ async function navegarParaImportacao(cp, c) {
   await tecla(cp, 'Enter', 'abre Importações');
   await ms(800);
 
-  // Home → 1° item do submenu (TXT); ArrowDown → 2° item (planilha)
-  // Evita depender de coordenada mapeada que pode estar errada
-  await tecla(cp, 'Home', '1° item submenu (TXT)');
-  await ms(350);
+  // Submenu Importações abre com TXT (1° item) focado — ArrowDown vai para planilha (2°)
   await tecla(cp, 'ArrowDown', 'planilha = 2° item');
   await ms(400);
   await shot(cp, 'nav-lancamentos');
@@ -336,10 +333,10 @@ async function importarPlanilhaSCI({ nomeArquivo, empresaCodigo, competencia }) 
   const { browser, context, page: portalPage } = await launchChrome(SCI_URL);
 
   try {
-    // Fecha abas html5 antigas de execuções anteriores para garantir sessão limpa
-    const abasAntigas = context.pages().filter(p => p.url().includes('html5'));
+    // Fecha TODAS as abas exceto o portal — garante que não há sessão SCI antiga
+    const abasAntigas = context.pages().filter(p => p !== portalPage);
     if (abasAntigas.length > 0) {
-      console.log(`    Fechando ${abasAntigas.length} aba(s) HTML5 antiga(s)...`);
+      console.log(`    Fechando ${abasAntigas.length} aba(s) antigas...`);
       await Promise.all(abasAntigas.map(p => p.close().catch(() => {})));
       await ms(1000);
     }
