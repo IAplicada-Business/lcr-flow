@@ -347,43 +347,26 @@ async function importarPlanilhaSCI({ nomeArquivo, empresaCodigo, competencia }) 
     console.log('[1] Fazendo 1° login (level40)...');
     await fazerLogin(portalPage);
 
-    // Aguarda StoreFront carregar após redirecionamento do login
-    console.log('[1b] Aguardando StoreFront...');
-    await ms(6000);
-    await shot(portalPage, 'storefront').catch(() => {});
-    const urlStoreFront = await portalPage.url().catch ? portalPage.url() : '(inacessível)';
-    console.log(`    URL pós-login: ${urlStoreFront}`);
-
-    // Tenta clicar no app SCI via DOM (StoreFront é HTML, não canvas)
-    if (!urlStoreFront.includes('html5')) {
-      const sciLancado = await portalPage.evaluate(() => {
-        for (const el of document.querySelectorAll('a, button, [role="button"], [data-appid], li')) {
-          const txt   = (el.textContent || '').trim();
-          const attrs = [el.getAttribute('title'), el.getAttribute('data-appid'), el.getAttribute('data-name')]
-                          .filter(Boolean).join(' ');
-          if ((txt + ' ' + attrs).match(/\bSCI\b/i) && el.offsetWidth > 0) {
-            el.click();
-            return txt || attrs;
-          }
-        }
-        return null;
-      }).catch(() => null);
-
-      if (sciLancado) {
-        console.log(`    ✅ App SCI clicado no StoreFront: "${sciLancado}"`);
-      } else {
-        console.log('    ⚠️  SCI não encontrado via DOM — verifique sci-storefront-*.png');
-      }
-    }
-
     console.log('[2] Detectando canvas HTML5 (aguarda popup)...');
     let cp = await esperarCanvas(context);
     await cp.bringToFront();
     await shot(cp, 'canvas-detectado');
-    console.log('    Canvas html5 encontrado. Aguardando login SCI (15s)...');
-    await ms(15000);
 
-    // Portal/canvas pode reabrir em nova aba — re-adquire
+    // Mantém sessão Citrix viva com mouse movement enquanto SCI carrega (15s)
+    // Sem interação o popup fecha por idle timeout antes de mostrar o formulário
+    console.log('    Canvas html5 detectado. Keep-alive 15s enquanto SCI inicia...');
+    for (let i = 0; i < 5; i++) {
+      await ms(3000);
+      try {
+        const c = await cp.$('canvas');
+        if (!c) break;
+        const box = await c.boundingBox();
+        if (box) await cp.mouse.move(box.x + box.width * 0.5, box.y + box.height * 0.5);
+        console.log(`    keep-alive ${(i + 1) * 3}s/15s`);
+      } catch { break; }
+    }
+    await shot(cp, 'canvas-prekeepend');
+
     cp = await refreshCp(cp, context);
     await cp.bringToFront();
     await shot(cp, 'canvas-login2');
