@@ -511,7 +511,10 @@ def processar_arquivos(empresa_id, competencia, arquivos, banco_cod, jwt):
     return resumo
 
 
-def processar_via_gestta(empresa_id, competencia, termo_cliente, tarefa_id, banco_cod, jwt):
+def processar_via_gestta(empresa_id, competencia, termo_cliente, tarefa_id, banco_cod, jwt, competencia_front=None):
+    # competencia = mês de VENCIMENTO (navegação no Gestta); competencia_front = mês do
+    # MOVIMENTO (onde os lançamentos entram no front). Default: iguais.
+    competencia_front = competencia_front or competencia
     comp_g = comp_to_gestta(competencia)
     responsavel = None
 
@@ -530,15 +533,15 @@ def processar_via_gestta(empresa_id, competencia, termo_cliente, tarefa_id, banc
         log("\n[G1b] Vinculando consultor responsável...")
         vincular_consultor(empresa_id, responsavel)
 
-    destino = f"outputs/gestta/{empresa_id}_{competencia}"
+    destino = f"outputs/gestta/{empresa_id}_{competencia_front}"
     log(f"\n[G2] Baixando documentos do Gestta (task {tarefa_id})...")
     arquivos = baixar_documentos_gestta(tarefa_id, comp_g, destino)
     log(f"    {len(arquivos)} arquivo(s): {[Path(a).name for a in arquivos]}")
     if not arquivos:
         raise RuntimeError("Nenhum documento baixado do Gestta.")
 
-    resumo = processar_arquivos(empresa_id, competencia, arquivos, banco_cod, jwt)
-    resumo.update({"tarefa_id": tarefa_id, "responsavel": responsavel})
+    resumo = processar_arquivos(empresa_id, competencia_front, arquivos, banco_cod, jwt)
+    resumo.update({"tarefa_id": tarefa_id, "responsavel": responsavel, "competencia_front": competencia_front})
     return resumo
 
 

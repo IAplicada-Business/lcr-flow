@@ -23,6 +23,8 @@ import argparse
 import datetime as dt
 from pathlib import Path
 
+import requests
+
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))
 sys.path.insert(0, str(ROOT / "src" / "ai"))
@@ -34,6 +36,59 @@ from gerar_planilha_supabase import BANCO_PARA_CODIGO       # noqa: E402
 
 OUT_DIR = ROOT / "outputs" / "orquestracao"
 BANCO_PADRAO = 657  # Itaú (fallback)
+COBRANCA_TEMPLATE = "614b4c905962410006a60e08"  # template "COBRANÇA DE MOVIMENTO MENSAL"
+GESTTA_SEARCH = "https://api.gestta.com.br/core/customer/task/search"
+SESSION_FILE = ROOT / "sessions" / "gestta-session.json"
+
+
+def _gestta_jwt() -> str:
+    """Lê o token (ngStorage-jwt) do arquivo de sessão → 'JWT eyJ...'."""
+    s = json.loads(SESSION_FILE.read_text(encoding="utf-8"))
+    for o in s.get("origins", []):
+        for kv in o.get("localStorage", []):
+            if kv.get("name") == "ngStorage-jwt":
+                return json.loads(kv["value"])  # remove aspas do JSON → "JWT eyJ..."
+    raise RuntimeError("token ngStorage-jwt não encontrado na sessão Gestta")
+
+
+def listar_cobrancas_api(competencia: str) -> list:
+    """Lista tarefas COBRANÇA DE MOVIMENTO MENSAL via API direta (sem navegador).
+    Filtra por Data Meta (DUE_DATE) no mês da competência. Paginação automática."""
+    jwt = _gestta_jwt()
+    ano, mes = int(competencia[:4]), int(competencia[5:7])
+    ny, nm = (ano + 1, 1) if mes == 12 else (ano, mes + 1)
+    start = f"{ano:04d}-{mes:02d}-01T03:00:00.000Z"
+    end = f"{ny:04d}-{nm:02d}-01T02:59:59.999Z"
+    base = {
+        "type": ["SERVICE_ORDER", "RECURRENT", "ACCOUNTING"],
+        "company_task": [COBRANCA_TEMPLATE], "status": ["OPEN"],
+        "start_date": start, "end_date": end, "date_type": "DUE_DATE",
+        "overdue": False, "downloaded": False, "not_downloaded": False, "fine": False,
+        "on_time": False, "collaborator": False, "no_owner": False, "email_not_sent": False,
+        "document_request_sent": True, "without_external_user": False, "os_free": False,
+        "os_workflow": True, "limit": 100,
+    }
+    headers = {"Authorization": jwt, "Content-Type": "application/json"}
+    out, page = [], 1
+    while True:
+        r = requests.post(GESTTA_SEARCH, headers=headers, json={**base, "page": page}, timeout=60)
+        if not r.ok:
+            raise RuntimeError(f"Gestta search HTTP {r.status_code}: {r.text[:200]}")
+        docs = r.json().get("docs", [])
+        for d in docs:
+            cust = d.get("customer") or {}
+            out.append({
+                "taskId": d.get("_id"),
+                "nome": d.get("name"),
+                "clienteCodigo": cust.get("code") or "",
+                "clienteNome": cust.get("name") or "",
+                "responsavel": (d.get("owner") or {}).get("name") or "",
+                "competence": (d.get("competence_date") or "")[:7],  # mês do movimento (lag)
+            })
+        if len(docs) < base["limit"]:
+            break
+        page += 1
+    return out
 
 
 def log(msg):
@@ -100,9 +155,11 @@ def processar_tarefa(t: dict, competencia: str, comp_g: str, jwt: str) -> dict:
     if not empresa:
         return {**base, "status": "erro", "motivo": f"empresa não encontrada no Supabase ('{nome or codigo}')"}
     empresa_id = empresa["id"]
+    comp_mov = t.get("competence") or competencia   # mês do movimento (lançamentos vão p/ cá)
     base["empresa_id"] = empresa_id
+    base["competencia_movimento"] = comp_mov
 
-    if ja_processada(empresa_id, competencia):
+    if ja_processada(empresa_id, comp_mov):
         return {**base, "status": "pulada_idempotencia"}
 
     # Etapa 2 — suficiência (Gestta leitura + IA)
@@ -122,7 +179,7 @@ def processar_tarefa(t: dict, competencia: str, comp_g: str, jwt: str) -> dict:
     # Etapa 4 — baixa + classifica + envia ao front (sem concluir no Gestta)
     banco = resolver_banco(empresa_id) or BANCO_PADRAO
     try:
-        resumo = bf.processar_via_gestta(empresa_id, competencia, None, tarefa_id, banco, jwt)
+        resumo = bf.processar_via_gestta(empresa_id, competencia, None, tarefa_id, banco, jwt, competencia_front=comp_mov)
     except Exception as e:
         return {**base, "status": "erro", "motivo": f"etapa4: {str(e)[:200]}"}
 
@@ -153,9 +210,9 @@ def main():
     jwt = bf.obter_jwt()
     log("  JWT do usuário de serviço obtido ✓")
 
-    log(f"\n[E1] Listando tarefas COBRANÇA ({comp_g})...")
-    tarefas = gestta("buscarTarefasCobranca", comp_g)
-    log(f"    {len(tarefas)} tarefa(s) COBRANÇA encontradas")
+    log(f"\n[E1] Listando tarefas COBRANÇA via API ({args.competencia})...")
+    tarefas = listar_cobrancas_api(args.competencia)
+    log(f"    {len(tarefas)} tarefa(s) COBRANÇA encontradas (resolver direto, sem navegador)")
 
     if args.cliente:
         c = args.cliente.lower()
