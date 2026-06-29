@@ -22,6 +22,9 @@ services:
       - ./sessions:/home/node/sessions
       - ./screenshots:/home/node/screenshots
       - ./outputs:/home/node/outputs
+      # Permite ao n8n disparar `docker exec lcr-playwright ...` (workflow PROC-001).
+      # A imagem n8n precisa do docker CLI (imagem custom) OU use a Opção B (n8n no host).
+      - /var/run/docker.sock:/var/run/docker.sock
 
   playwright:
     build:
