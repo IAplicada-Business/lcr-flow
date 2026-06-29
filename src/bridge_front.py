@@ -23,6 +23,7 @@ import os
 import sys
 import csv
 import json
+import time
 import argparse
 import subprocess
 import datetime as dt
@@ -452,6 +453,14 @@ def processar_documento_edge(empresa_id, competencia, competencia_id, file_path,
     })
     documento_id = doc[0]["id"]
     res = chamar_edge("processar-documento", {"documento_id": documento_id}, jwt)
+    # Retry no rate limit (429) da Anthropic: aguarda a janela de 1 min e tenta de novo.
+    tentativas = 0
+    while (not res.get("ok")) and tentativas < 3 and \
+            any(k in str(res.get("error", "")) for k in ("429", "rate_limit", "rate limit")):
+        tentativas += 1
+        log(f"    rate limit Anthropic — aguardando 65s e repetindo ({tentativas}/3)...")
+        time.sleep(65)
+        res = chamar_edge("processar-documento", {"documento_id": documento_id}, jwt)
     log(f"    {p.name} [{tipo}] → {json.dumps(res, ensure_ascii=False)[:160]}")
     return {"documento_id": documento_id, "tipo": tipo, "edge": res}
 
