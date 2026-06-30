@@ -19,7 +19,19 @@ export const getDashboardStats = createServerFn({ method: "GET" })
     const { supabase } = context;
     const competencia = data?.competencia ?? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
 
-    const [empresas, docsAguardando, lancamentosMes, conciliacoesPendentes, fases, atencaoUrgente, docsRows, conciliacoesRows, tarefasRows] = await Promise.all([
+    // Últimas 6 competências (incluindo a selecionada) para série temporal.
+    const seisMeses: string[] = [];
+    {
+      const [yy, mm] = competencia.split("-").map(Number);
+      const d = new Date(yy, mm - 1, 1);
+      for (let i = 0; i < 6; i++) {
+        seisMeses.unshift(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+        d.setMonth(d.getMonth() - 1);
+      }
+    }
+    const compAnterior = seisMeses[seisMeses.length - 2];
+
+    const [empresas, docsAguardando, lancamentosMes, conciliacoesPendentes, fases, atencaoUrgente, docsRows, conciliacoesRows, tarefasRows, serieLanc, serieConcil, lancMesAnterior, empresasRegime, topClientesRaw] = await Promise.all([
       supabase.from("empresas").select("id", { count: "exact", head: true }),
       supabase.from("documentos").select("id", { count: "exact", head: true }).in("status", ["recebido", "classificado"]),
       supabase.from("lancamentos").select("id", { count: "exact", head: true }).eq("competencia", competencia),
@@ -33,6 +45,11 @@ export const getDashboardStats = createServerFn({ method: "GET" })
       supabase.from("documentos").select("status"),
       supabase.from("conciliacoes").select("status").eq("competencia", competencia),
       supabase.from("tarefas").select("status"),
+      supabase.from("lancamentos").select("competencia").in("competencia", seisMeses),
+      supabase.from("conciliacoes").select("competencia, status").in("competencia", seisMeses),
+      supabase.from("lancamentos").select("id", { count: "exact", head: true }).eq("competencia", compAnterior),
+      supabase.from("empresas").select("regime"),
+      supabase.from("lancamentos").select("empresa_id, empresas(razao_social)").eq("competencia", competencia).limit(2000),
     ]);
 
     const faseCounts: Record<string, number> = { cobranca: 0, lancamento: 0, conciliacao: 0, entregue: 0 };
@@ -59,16 +76,77 @@ export const getDashboardStats = createServerFn({ method: "GET" })
     const totalConciliacoes = totalEmpresas;
     const tarefasAbertas = (tarefasRows.data ?? []).filter((t) => !["done", "concluida"].includes(t.status)).length;
 
+    // Série dos últimos 6 meses: lançamentos + conciliações concluídas por mês.
+    const lancPorMes = Object.fromEntries(seisMeses.map((c) => [c, 0])) as Record<string, number>;
+    (serieLanc.data ?? []).forEach((r) => { if (r.competencia in lancPorMes) lancPorMes[r.competencia]++; });
+    const concilPorMes = Object.fromEntries(seisMeses.map((c) => [c, { concluida: 0, total: 0 }])) as Record<string, { concluida: number; total: number }>;
+    (serieConcil.data ?? []).forEach((r) => {
+      if (r.competencia in concilPorMes) {
+        concilPorMes[r.competencia].total++;
+        if (r.status === "concluida") concilPorMes[r.competencia].concluida++;
+      }
+    });
+    const serieMensal = seisMeses.map((c) => ({
+      competencia: c,
+      lancamentos: lancPorMes[c],
+      concluidas: concilPorMes[c].concluida,
+      taxa: concilPorMes[c].total > 0 ? Math.round((concilPorMes[c].concluida / concilPorMes[c].total) * 100) : 0,
+    }));
+
+    // Delta vs mês anterior (variação % no volume de lançamentos).
+    const lancAnt = lancMesAnterior.count ?? 0;
+    const lancAtual = lancamentosMes.count ?? 0;
+    const deltaLanc = lancAnt > 0 ? Math.round(((lancAtual - lancAnt) / lancAnt) * 100) : (lancAtual > 0 ? 100 : 0);
+
+    // Distribuição por regime tributário (carteira).
+    const regimeCounts: Record<string, number> = { simples: 0, presumido: 0, real: 0, mei: 0, outro: 0 };
+    (empresasRegime.data ?? []).forEach((r) => {
+      const k = r.regime ?? "outro";
+      if (k in regimeCounts) regimeCounts[k]++;
+      else regimeCounts.outro++;
+    });
+    const regimes = [
+      { label: "Simples Nacional", key: "simples", total: regimeCounts.simples },
+      { label: "Lucro Presumido", key: "presumido", total: regimeCounts.presumido },
+      { label: "Lucro Real", key: "real", total: regimeCounts.real },
+      { label: "MEI", key: "mei", total: regimeCounts.mei },
+      { label: "Sem classificação", key: "outro", total: regimeCounts.outro },
+    ];
+
+    // Top 5 clientes por volume de lançamentos no mês.
+    const porEmpresa: Record<string, { id: string; nome: string; total: number }> = {};
+    (topClientesRaw.data ?? []).forEach((r) => {
+      const id = r.empresa_id as string;
+      const nome = (r.empresas as { razao_social?: string } | null)?.razao_social ?? "—";
+      if (!porEmpresa[id]) porEmpresa[id] = { id, nome, total: 0 };
+      porEmpresa[id].total++;
+    });
+    const topClientes = Object.values(porEmpresa).sort((a, b) => b.total - a.total).slice(0, 5);
+
+    // Saúde operacional: % docs já processados/conciliados (proxy de SLA).
+    const docsCompletos = docsByStatus.processado + docsByStatus.conciliado;
+    const saudeDocs = totalDocs > 0 ? Math.round((docsCompletos / totalDocs) * 100) : 0;
+    const taxaConcluidas = totalConciliacoes > 0 ? Math.round((conciliacoesByStatus.concluida / totalConciliacoes) * 100) : 0;
+    const taxaDivergencias = totalConciliacoes > 0 ? Math.round((conciliacoesByStatus.divergencias / totalConciliacoes) * 100) : 0;
+
     return {
       competencia,
       clientesAtivos: empresas.count ?? 0,
       docsAguardando: docsAguardando.count ?? 0,
-      lancamentosMes: lancamentosMes.count ?? 0,
+      lancamentosMes: lancAtual,
+      lancamentosMesAnterior: lancAnt,
+      deltaLanc,
       conciliacoesPendentes: Math.max(0, totalEmpresas - conciliacoesByStatus.concluida),
       tarefasAbertas,
       totalDocs,
       totalConciliacoes,
+      saudeDocs,
+      taxaConcluidas,
+      taxaDivergencias,
       atencaoUrgente: atencaoUrgente.data ?? [],
+      serieMensal,
+      regimes,
+      topClientes,
       fases: [
         { fase: "Cobrança", total: faseCounts.cobranca },
         { fase: "Lançamento", total: faseCounts.lancamento },
