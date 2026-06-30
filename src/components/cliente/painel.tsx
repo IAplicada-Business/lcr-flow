@@ -11,7 +11,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { Markdown } from "@/components/markdown";
-import { listDocumentos, gerarPlanilhaSci, getHistoricoCerebro, createDocumento, ensureCompetencia, listLancamentosConciliacao, type SciLinha } from "@/lib/lcr.functions";
+import { listDocumentos, gerarPlanilhaSci, getHistoricoCerebro, createDocumento, ensureCompetencia, listLancamentosConciliacao, getEmpresa, type SciLinha } from "@/lib/lcr.functions";
+import { baixarPlanilhaSciXls, bancoCodigoDe } from "@/lib/sci-xls";
 import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
 import { supabase } from "@/integrations/supabase/client";
 import { Sparkles, Loader2, ClipboardCheck, Download, FileSpreadsheet, X, Plus, Eye } from "lucide-react";
@@ -227,6 +228,17 @@ export function PlanilhaSciTab({ empresaId, empresaNome, competencia }: { empres
   const totalGeral = lancs.reduce((s, l) => s + (l.valor ?? 0), 0);
   const contasDistintas = new Set(lancs.map((l) => l.conta?.codigo).filter(Boolean)).size;
 
+  // Código do banco (contrapartida débito/crédito) a partir da conta bancária da empresa.
+  const { data: emp } = useQuery({ queryKey: ["empresa", empresaId], queryFn: () => getEmpresa({ data: { id: empresaId } }) });
+  const contasBanc = (emp as { contas_bancarias?: { banco: string | null }[] } | undefined)?.contas_bancarias ?? [];
+  const bancoCodigo = bancoCodigoDe(contasBanc[0]?.banco ?? null);
+
+  function baixarXls() {
+    const n = baixarPlanilhaSciXls(empresaNome, competencia, lancs, bancoCodigo);
+    if (n === 0) toast.warning("Nenhum lançamento com conta para exportar.");
+    else toast.success(`Planilha SCI (.xls) gerada — ${n} lançamento(s) no layout de importação.`);
+  }
+
   async function gerar() {
     setBusy(true);
     try {
@@ -248,10 +260,13 @@ export function PlanilhaSciTab({ empresaId, empresaNome, competencia }: { empres
           <FileSpreadsheet className="h-5 w-5 text-primary" />
           <h3 className="font-display text-xl">Planilha SCI · {formatCompetencia(competencia)}</h3>
         </div>
-        <div className="flex items-center gap-2">
-          <Button size="sm" disabled={busy} onClick={gerar}><FileSpreadsheet className="mr-1 h-4 w-4" />{busy ? "Gerando…" : "Gerar SCI"}</Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" disabled={lancs.length === 0} onClick={baixarXls} title="Baixa o arquivo de importação SCI (.xls) — uma linha por lançamento, layout do modelo">
+            <FileSpreadsheet className="mr-1 h-4 w-4" />Baixar SCI (.xls)
+          </Button>
+          <Button variant="outline" size="sm" disabled={busy} onClick={gerar}>{busy ? "Gerando…" : "Gerar resumo"}</Button>
           <Button variant="outline" size="sm" disabled={!linhas || linhas.length === 0} onClick={() => linhas && exportarCsv(empresaNome, competencia, linhas)}>
-            <Download className="mr-1 h-4 w-4" />Baixar CSV
+            <Download className="mr-1 h-4 w-4" />Baixar resumo (CSV)
           </Button>
         </div>
       </div>
