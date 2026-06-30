@@ -28,6 +28,8 @@ const HIST_IA = ["7","159","267","297","317","427","437","442","447","478","497"
 const SYSTEM_PROMPT = `Você é o classificador de documentos contábeis da LCR Contadores.
 Analise o documento enviado por um cliente e:
 1. Identifique o TIPO entre: 'extrato_bancario', 'nfe_servico', 'nfe_produto', 'planilha_financeira', 'darf', 'guia_inss_fgts', 'recibo', 'fatura', 'comprovante', 'outro'.
+   * MARQUE como 'extrato_bancario' SEMPRE QUE: o documento mostre movimentações bancárias do mês (várias linhas com data/valor da conta), comprovantes consolidados de PIX/TED/DOC/pagamentos do mês, posição consolidada de investimentos (renda fixa/CDB/poupança) — todos esses casos alimentam a conciliação bancária.
+   * Use 'comprovante' SOMENTE para comprovantes avulsos isolados (1 transferência única) que não compõem um extrato consolidado do mês.
 2. Extraia os dados estruturados relevantes (resumo no campo dados_extraidos).
 3. Sugira os LANÇAMENTOS contábeis correspondentes.
 
@@ -39,6 +41,55 @@ Regras:
 - DARF/GPS: 1 lançamento de despesa tributária. Recibo: 1 lançamento de despesa operacional.
 - valor sempre positivo. data_lancamento em AAAA-MM-DD. competencia em AAAA-MM.
 - Se não tiver certeza da conta, use a conta do grupo correto mais próxima e marque confidence < 0.7.`;
+
+// Mapeia o tipo_documento que a IA retorna (texto livre) para o ENUM
+// documento_tipo do banco. Reconhece sinônimos comuns.
+const TIPO_ALIAS: Record<string, string | null> = {
+  extrato: "extrato",
+  extrato_bancario: "extrato",
+  extrato_consolidado: "extrato",
+  movimento_bancario: "extrato",
+  comprovante: "extrato",
+  comprovantes: "extrato",
+  comprovante_bancario: "extrato",
+  transferencia: "extrato",
+  transferencias: "extrato",
+  posicao_consolidada: "extrato",
+  posicao_investimentos: "extrato",
+  planilha_financeira: "planilha_financeira",
+  planilha: "planilha_financeira",
+  fluxo_caixa: "planilha_financeira",
+  darf: "darf",
+  guia_inss_fgts: "darf",
+  gps: "darf",
+  guia: "darf",
+  recibo: "recibo",
+  recibo_pagamento: "recibo",
+  fatura: "fatura_cartao",
+  fatura_cartao: "fatura_cartao",
+  movimento_contabil: "movimento_contabil",
+  // NFs: deixa como null = preserva o tipo cadastrado no upload (nf_entrada
+  // vs nf_saida depende do papel do cliente, a IA não tem como decidir).
+  nfe_servico: null,
+  nfe_produto: null,
+  nf_entrada: "nf_entrada",
+  nf_saida: "nf_saida",
+  outro: "outros",
+  outros: "outros",
+};
+
+function mapearTipoIa(tipo: string | undefined | null): string | null {
+  if (!tipo) return null;
+  const k = tipo.toLowerCase().replace(/[\s-]+/g, "_");
+  if (k in TIPO_ALIAS) return TIPO_ALIAS[k];
+  // Heurística de fallback: substring
+  if (k.includes("extrato") || k.includes("comprovante") || k.includes("movimento_banc")) return "extrato";
+  if (k.includes("planilha") || k.includes("fluxo")) return "planilha_financeira";
+  if (k.includes("darf") || k.includes("gps") || k.includes("guia")) return "darf";
+  if (k.includes("recibo")) return "recibo";
+  if (k.includes("fatura")) return "fatura_cartao";
+  return null;
+}
 
 const SCHEMA = {
   type: "object",
@@ -126,19 +177,18 @@ Deno.serve(async (req) => {
   const bytes = new Uint8Array(await file.arrayBuffer());
   const ext = (doc.arquivo_nome ?? path).split(".").pop()?.toLowerCase() ?? "";
 
-  // ---- Trilho EXTRATO BANCÁRIO ---------------------------------------
-  // Extrato não gera razão (evita razão = extrato e divergências artificiais).
-  // O arquivo é espelhado no bucket `conciliacoes` e vinculado como
-  // extrato_csv_url da conciliação dessa empresa/competência, deixando-a
-  // pronta para o "Conciliar agora".
-  if (doc.tipo === "extrato") {
+  // Helper compartilhado: vincula este documento como extrato à conciliação
+  // da competência. Usado no trilho inicial (doc.tipo='extrato') e também
+  // quando a IA descobrir, depois da classificação, que o documento é um
+  // extrato mas foi importado com tipo errado.
+  type VincularExtras = { classificacao?: Record<string, unknown> };
+  async function vincularComoExtrato(extras?: VincularExtras): Promise<Response> {
     const competenciaExtrato = doc.competencia ?? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
     const safeName = (doc.arquivo_nome ?? "extrato").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9._-]/g, "_");
     const concPath = `${doc.empresa_id}/${competenciaExtrato}/extrato-${crypto.randomUUID()}-${safeName}`;
     const { error: upErr } = await admin.storage.from("conciliacoes").upload(concPath, bytes, { upsert: false, cacheControl: "3600", contentType: file.type || "text/csv" });
     if (upErr) return markErro(`Falha ao vincular extrato à conciliação: ${upErr.message}`);
 
-    // garante a conciliação (empresa/competência) e vincula o extrato
     let concId: string | null = null;
     const { data: existente } = await admin
       .from("conciliacoes")
@@ -158,10 +208,15 @@ Deno.serve(async (req) => {
       concId = nova.id;
     }
 
+    // Se já existiam lançamentos gerados por esta versão do documento (ex.: a IA
+    // tentou tratar como NF/planilha antes), limpa pra evitar duplicidade na razão.
+    await admin.from("lancamentos").delete().eq("documento_id", documento_id);
+
     await admin.from("documentos").update({
+      tipo: "extrato",
       status: "processado",
       status_processamento: "classificado",
-      classificacao_ia: {
+      classificacao_ia: extras?.classificacao ?? {
         tipo_documento: "extrato_bancario",
         competencia: competenciaExtrato,
         observacoes: "Extrato vinculado à Conciliação bancária da competência. Use 'Conciliar agora' na aba Conciliação.",
@@ -170,7 +225,12 @@ Deno.serve(async (req) => {
       lancamentos_gerados: 0,
     }).eq("id", documento_id);
 
-    return json(200, { ok: true, vinculado_conciliacao_id: concId, lancamentos_gerados: 0 });
+    return json(200, { ok: true, vinculado_conciliacao_id: concId, lancamentos_gerados: 0, tipo_ajustado: "extrato" });
+  }
+
+  // Trilho inicial: documento já chega marcado como extrato pelo upload.
+  if (doc.tipo === "extrato") {
+    return await vincularComoExtrato();
   }
 
   let contentBlock: Record<string, unknown>;
@@ -229,6 +289,22 @@ Deno.serve(async (req) => {
     classificacao = JSON.parse(tb?.text ?? "{}");
   } catch (e) {
     return markErro(`Falha na Claude API: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  // Mapeia o tipo_documento que a IA retornou para o enum do banco. Se a IA
+  // descobriu que é EXTRATO (mesmo o upload tendo marcado como "outros"/
+  // "planilha_financeira"), redireciona para o trilho do extrato — vincula
+  // à conciliação e descarta lançamentos (que viriam errados na razão).
+  const tipoMapeado = mapearTipoIa(classificacao.tipo_documento);
+  if (tipoMapeado === "extrato" && doc.tipo !== "extrato") {
+    return await vincularComoExtrato({ classificacao: classificacao as Record<string, unknown> });
+  }
+  // Se a IA sugeriu um tipo diferente do cadastrado (ex.: doc subiu como
+  // "outros" mas a IA reconheceu como darf/recibo/planilha), atualiza o tipo
+  // pra que filtros/contagens fiquem corretos. Mantém o tipo atual quando o
+  // mapeamento é null (sem confiança) ou igual.
+  if (tipoMapeado && tipoMapeado !== doc.tipo) {
+    await admin.from("documentos").update({ tipo: tipoMapeado }).eq("id", documento_id);
   }
 
   const competencia = (classificacao.competencia && /^\d{4}-\d{2}$/.test(classificacao.competencia))
