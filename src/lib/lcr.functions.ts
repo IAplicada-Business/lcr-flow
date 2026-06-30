@@ -701,7 +701,7 @@ export const listLancamentosConciliacao = createServerFn({ method: "GET" })
     const { data: empresa } = await context.supabase.from("empresas").select("id, razao_social, nome_fantasia").eq("id", data.empresa_id).maybeSingle();
     const { data: rows, error } = await context.supabase
       .from("lancamentos")
-      .select("id, data_lancamento, valor, descricao, conciliado, confidence, status, conta:conta_id(codigo, descricao, tipo, sci_apelido, sci_historico_padrao), historico:historico_id(codigo, descricao, sci_apelido)")
+      .select("id, data_lancamento, valor, descricao, documento_numero, conciliado, confidence, status, conta:conta_id(codigo, descricao, tipo, sci_apelido, sci_historico_padrao), historico:historico_id(codigo, descricao, sci_apelido)")
       .eq("empresa_id", data.empresa_id)
       .eq("competencia", data.competencia)
       .not("valor", "is", null)
@@ -792,12 +792,14 @@ export const editarLancamento = createServerFn({ method: "POST" })
     valor: z.number().optional(),
     descricao: z.string().max(200).optional(),
     conta_codigo: z.string().max(40).optional(),
+    documento_numero: z.string().max(80).nullable().optional(),
   }).parse(d))
   .handler(async ({ context, data }) => {
     const patch: Record<string, unknown> = {};
     if (data.data_lancamento) patch.data_lancamento = data.data_lancamento;
     if (typeof data.valor === "number") patch.valor = Math.abs(data.valor);
     if (data.descricao != null) patch.descricao = data.descricao;
+    if (data.documento_numero !== undefined) patch.documento_numero = data.documento_numero;
 
     // Atribuir/corrigir conta: resolve o código → conta_id no escopo da empresa
     // (conta específica da empresa tem prioridade sobre a global, empresa_id null).
