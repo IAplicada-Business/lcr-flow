@@ -14,7 +14,7 @@ import { getConciliacaoDetalhe, listLancamentosConciliacao, conciliarParManual, 
 import { formatCompetencia } from "@/lib/format";
 import { supabase } from "@/integrations/supabase/client";
 import { requireAcesso } from "@/lib/guard";
-import { ChevronLeft, Download, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle, FileText, Link2, Pencil, ChevronsUpDown, Check, Plus, Trash2 } from "lucide-react";
+import { ChevronLeft, Download, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle, FileText, Link2, Pencil, ChevronsUpDown, Check, Plus, Trash2, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -188,6 +188,8 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
   const conc = data?.conciliacao ?? null;
   const resultado = (conc?.resultado ?? null) as Resultado;
   const temExtrato = !!conc?.extrato_csv_url;
+  const extratoInfo = (data as unknown as { extrato?: { id: string; arquivo_nome: string | null; recebido_em: string; saldo_inicial: number | null; saldo_final: number | null } | null })?.extrato ?? null;
+  const outrosLancs = (data as unknown as { outros_lancamentos?: number })?.outros_lancamentos ?? 0;
 
   async function conciliar() {
     if (!conc) return;
@@ -304,31 +306,73 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
 
   return (
     <>
-      {/* Ação no topo: extrato (vem do Gestta) + Conciliar agora */}
-      <Card className="mb-6">
-        <CardContent className="flex flex-wrap items-center justify-between gap-4 py-5">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted">
-              <FileText className="h-5 w-5 text-primary" />
+      {/* KPI strip: extrato + saldos + outros lançamentos + ação Conciliar */}
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <Card className="rounded-2xl border-0 shadow-soft">
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <FileText className="h-4 w-4" />
+              </div>
+              <StatusPill variant={temExtrato ? "now" : "next"}>{temExtrato ? "Disponível" : "Pendente"}</StatusPill>
             </div>
-            <div>
-              <div className="font-medium leading-tight">Extrato bancário</div>
-              <div className="text-xs text-muted-foreground">{temExtrato ? "Extraído do Gestta" : "Aguardando extração do Gestta"}</div>
+            <div className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground">Extrato bancário</div>
+            <div className="font-display text-lg leading-tight truncate" title={extratoInfo?.arquivo_nome ?? ""}>
+              {temExtrato ? (extratoInfo?.arquivo_nome ?? "Extrato vinculado") : "Aguardando extração"}
             </div>
-            <StatusPill variant={temExtrato ? "now" : "next"}>{temExtrato ? "Disponível" : "Pendente"}</StatusPill>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {temExtrato && (
-              <Button variant="ghost" size="sm" onClick={() => conc?.extrato_csv_url && baixar(conc.extrato_csv_url)}>
-                <Download className="mr-1 h-4 w-4" />Baixar
+            <div className="mt-1 text-[11px] text-muted-foreground">
+              {temExtrato ? "Extraído via Gestta" : "Quando chegar, o conciliar libera"}
+            </div>
+            {temExtrato && conc?.extrato_csv_url && (
+              <Button variant="ghost" size="sm" className="mt-2 h-7 px-2 text-[11px]" onClick={() => baixar(conc.extrato_csv_url!)}>
+                <Download className="mr-1 h-3 w-3" />Baixar
               </Button>
             )}
-            <Button disabled={!temExtrato || busy === "conciliar"} onClick={conciliar}>
-              <Wand2 className="mr-1.5 h-4 w-4" />{busy === "conciliar" ? "Conciliando..." : "Conciliar agora"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border-0 shadow-soft">
+          <CardContent className="p-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <ArrowDownToLine className="h-4 w-4" />
+            </div>
+            <div className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground">Saldo inicial</div>
+            <div className="font-display text-2xl leading-tight">
+              {extratoInfo?.saldo_inicial != null ? brl(extratoInfo.saldo_inicial) : <span className="text-muted-foreground">—</span>}
+            </div>
+            <div className="mt-1 text-[11px] text-muted-foreground">Abertura do extrato</div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border-0 shadow-soft">
+          <CardContent className="p-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+              <ArrowUpFromLine className="h-4 w-4" />
+            </div>
+            <div className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground">Saldo final</div>
+            <div className="font-display text-2xl leading-tight">
+              {extratoInfo?.saldo_final != null ? brl(extratoInfo.saldo_final) : <span className="text-muted-foreground">—</span>}
+            </div>
+            <div className="mt-1 text-[11px] text-muted-foreground">Fechamento do extrato</div>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-2xl border-0 shadow-soft">
+          <CardContent className="p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                <ListChecks className="h-4 w-4" />
+              </div>
+              <Button size="sm" disabled={!temExtrato || busy === "conciliar"} onClick={conciliar} className="h-8">
+                <Wand2 className="mr-1 h-3.5 w-3.5" />{busy === "conciliar" ? "Conciliando…" : "Conciliar"}
+              </Button>
+            </div>
+            <div className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground">Outros lançamentos</div>
+            <div className="font-display text-2xl leading-tight">{outrosLancs.toLocaleString("pt-BR")}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">Manuais, NFs, recibos (sem extrato)</div>
+          </CardContent>
+        </Card>
+      </div>
 
       {/* Aviso: documentos não classificados (sem lançamento) — tratar manualmente */}
       {docsErro.length > 0 && (

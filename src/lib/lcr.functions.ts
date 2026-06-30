@@ -1101,14 +1101,70 @@ export const getConciliacaoDetalhe = createServerFn({ method: "GET" })
     if (eErr) throw new Error(eErr.message);
     if (!empresa) throw new Error("Empresa não encontrada");
 
-    const { data: conc } = await context.supabase
-      .from("conciliacoes")
-      .select("id, competencia, status, divergencias_count, razao_csv_url, extrato_csv_url, resultado")
-      .eq("empresa_id", data.empresa_id)
-      .eq("competencia", competencia)
-      .maybeSingle();
+    const [{ data: conc }, { data: extratoDoc }, lancsRes] = await Promise.all([
+      context.supabase
+        .from("conciliacoes")
+        .select("id, competencia, status, divergencias_count, razao_csv_url, extrato_csv_url, resultado")
+        .eq("empresa_id", data.empresa_id)
+        .eq("competencia", competencia)
+        .maybeSingle(),
+      // Documento extrato da competência (pra pegar saldo_inicial/saldo_final
+      // que a IA extraiu nos dados_extraidos).
+      context.supabase
+        .from("documentos")
+        .select("id, arquivo_nome, classificacao_ia, dados_extraidos, recebido_em")
+        .eq("empresa_id", data.empresa_id)
+        .eq("competencia", competencia)
+        .eq("tipo", "extrato")
+        .order("recebido_em", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      context.supabase
+        .from("lancamentos")
+        .select("id, documento_id", { count: "exact", head: false })
+        .eq("empresa_id", data.empresa_id)
+        .eq("competencia", competencia),
+    ]);
 
-    return { empresa, competencia, conciliacao: conc ?? null };
+    // Extrai saldos do que a IA já parseou (suporta chaves comuns em PT/EN).
+    function pickNumero(obj: Record<string, unknown> | null | undefined, chaves: string[]): number | null {
+      if (!obj || typeof obj !== "object") return null;
+      for (const k of chaves) {
+        const v = (obj as Record<string, unknown>)[k];
+        if (v == null || v === "") continue;
+        const n = typeof v === "number" ? v : Number(String(v).replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
+        if (!Number.isNaN(n)) return n;
+      }
+      return null;
+    }
+    let saldoInicial: number | null = null;
+    let saldoFinal: number | null = null;
+    if (extratoDoc) {
+      const ci = extratoDoc.classificacao_ia as Record<string, unknown> | null;
+      const dados = (ci?.dados_extraidos ?? extratoDoc.dados_extraidos) as Record<string, unknown> | null;
+      saldoInicial = pickNumero(dados, ["saldo_inicial", "saldo_inicio", "saldo_anterior", "opening_balance", "balance_start"]);
+      saldoFinal = pickNumero(dados, ["saldo_final", "saldo_atual", "saldo_disponivel", "closing_balance", "balance_end"]);
+    }
+
+    // Outros lançamentos = total - os que vieram do documento extrato.
+    const totalLancs = lancsRes.data?.length ?? 0;
+    const extratoLancs = (lancsRes.data ?? []).filter((l) => l.documento_id === extratoDoc?.id).length;
+    const outrosLancs = Math.max(0, totalLancs - extratoLancs);
+
+    return {
+      empresa,
+      competencia,
+      conciliacao: conc ?? null,
+      extrato: extratoDoc ? {
+        id: extratoDoc.id,
+        arquivo_nome: extratoDoc.arquivo_nome,
+        recebido_em: extratoDoc.recebido_em,
+        saldo_inicial: saldoInicial,
+        saldo_final: saldoFinal,
+      } : null,
+      outros_lancamentos: outrosLancs,
+      total_lancamentos: totalLancs,
+    };
   });
 
 export const listTarefas = createServerFn({ method: "GET" })
