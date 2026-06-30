@@ -261,12 +261,12 @@ export function PlanilhaSciTab({ empresaId, empresaNome, competencia }: { empres
           <h3 className="font-display text-xl">Planilha SCI · {formatCompetencia(competencia)}</h3>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" disabled={lancs.length === 0} onClick={baixarXls} title="Baixa o arquivo de importação SCI (.xls) — uma linha por lançamento, layout do modelo">
-            <FileSpreadsheet className="mr-1 h-4 w-4" />Baixar SCI (.xls)
+          <Button size="sm" disabled={busy} onClick={gerar}><FileSpreadsheet className="mr-1 h-4 w-4" />{busy ? "Gerando…" : "Gerar SCI"}</Button>
+          <Button variant="outline" size="sm" disabled={lancs.length === 0} onClick={baixarXls} title="Baixa o arquivo de importação SCI (.xls) — uma linha por lançamento, layout do modelo">
+            <Download className="mr-1 h-4 w-4" />Baixar SCI (.xls)
           </Button>
-          <Button variant="outline" size="sm" disabled={busy} onClick={gerar}>{busy ? "Gerando…" : "Gerar resumo"}</Button>
           <Button variant="outline" size="sm" disabled={!linhas || linhas.length === 0} onClick={() => linhas && exportarCsv(empresaNome, competencia, linhas)}>
-            <Download className="mr-1 h-4 w-4" />Baixar resumo (CSV)
+            <Download className="mr-1 h-4 w-4" />Baixar CSV
           </Button>
         </div>
       </div>
