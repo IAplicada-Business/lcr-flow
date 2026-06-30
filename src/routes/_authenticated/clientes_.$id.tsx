@@ -118,10 +118,14 @@ function VisaoGeralCliente({ empresaId, empresa, competencia }: { empresaId: str
 
   return (
     <div className="space-y-5">
-      {/* HERO — KPI strip com gráfico */}
+      {/* HERO — deep navy igual ao dashboard, com glow ambiente */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="rounded-3xl border-0 shadow-soft bg-primary text-primary-foreground lg:col-span-2">
-          <CardContent className="p-6">
+        <div className="relative overflow-hidden rounded-3xl bg-deep p-6 text-primary-foreground shadow-soft lg:col-span-2">
+          {/* Glow ambiente — mesma assinatura visual do dashboard */}
+          <div className="pointer-events-none absolute -right-20 -top-20 h-72 w-72 rounded-full bg-primary/40 blur-3xl" />
+          <div className="pointer-events-none absolute -bottom-24 -left-10 h-64 w-64 rounded-full bg-accent-lime/20 blur-3xl" />
+
+          <div className="relative">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <div className="text-[11px] uppercase tracking-wider text-primary-foreground/70">Performance · {formatCompetencia(competencia)}</div>
@@ -134,15 +138,15 @@ function VisaoGeralCliente({ empresaId, empresa, competencia }: { empresaId: str
                 <div className="mt-2 text-xs text-primary-foreground/70">Movimentado: {brl(kpis.valorMes)}</div>
               </div>
               <div className="grid grid-cols-2 gap-2 text-right text-sm">
-                <div className="rounded-2xl bg-primary-foreground/10 p-3">
+                <div className="rounded-2xl bg-primary-foreground/10 p-3 backdrop-blur-sm">
                   <div className="text-[10px] uppercase tracking-wide text-primary-foreground/70">Docs total</div>
                   <div className="mt-1 font-display text-xl">{kpis.totalDocs}</div>
                 </div>
-                <div className="rounded-2xl bg-primary-foreground/10 p-3">
+                <div className="rounded-2xl bg-primary-foreground/10 p-3 backdrop-blur-sm">
                   <div className="text-[10px] uppercase tracking-wide text-primary-foreground/70">Docs no mês</div>
                   <div className="mt-1 font-display text-xl">{kpis.docsMes}</div>
                 </div>
-                <div className="rounded-2xl bg-primary-foreground/10 p-3 col-span-2">
+                <div className="rounded-2xl bg-primary-foreground/10 p-3 backdrop-blur-sm col-span-2">
                   <div className="text-[10px] uppercase tracking-wide text-primary-foreground/70">Último doc</div>
                   <div className="mt-1 text-sm font-medium">{kpis.ultimoDoc ? DOC_TIPO_LABEL[kpis.ultimoDoc.tipo] : "—"} <span className="text-primary-foreground/70">· {ultimoDocRel}</span></div>
                 </div>
@@ -172,8 +176,8 @@ function VisaoGeralCliente({ empresaId, empresa, competencia }: { empresaId: str
             <div className="flex justify-between px-1 text-[10px] uppercase tracking-wider text-primary-foreground/60">
               {serieMensal.map((s) => <span key={s.competencia}>{formatShortComp(s.competencia)}</span>)}
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {/* Saúde de coleta no mês */}
         <Card className="rounded-3xl border-0 shadow-soft">
