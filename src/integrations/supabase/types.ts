@@ -14,36 +14,6 @@ export type Database = {
   }
   public: {
     Tables: {
-      _tmp_gestta: {
-        Row: {
-          active: boolean | null
-          cnpj_clean: string | null
-          codigo: string | null
-          monthly: number | null
-          nome_norm: string | null
-          regime_enum: Database["public"]["Enums"]["regime_tributario"] | null
-          regime_origem: string | null
-        }
-        Insert: {
-          active?: boolean | null
-          cnpj_clean?: string | null
-          codigo?: string | null
-          monthly?: number | null
-          nome_norm?: string | null
-          regime_enum?: Database["public"]["Enums"]["regime_tributario"] | null
-          regime_origem?: string | null
-        }
-        Update: {
-          active?: boolean | null
-          cnpj_clean?: string | null
-          codigo?: string | null
-          monthly?: number | null
-          nome_norm?: string | null
-          regime_enum?: Database["public"]["Enums"]["regime_tributario"] | null
-          regime_origem?: string | null
-        }
-        Relationships: []
-      }
       audit_log: {
         Row: {
           acao: string
