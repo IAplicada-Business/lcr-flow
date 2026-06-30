@@ -10,7 +10,7 @@ import { DOC_TIPO_LABEL, formatCompetencia } from "@/lib/format";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { requireAcesso } from "@/lib/guard";
-import { ChevronLeft, CheckCircle2, Sparkles, AlertTriangle, FileText, Loader2, GitCompare, ArrowRight, FileSpreadsheet } from "lucide-react";
+import { ChevronLeft, ChevronRight, CheckCircle2, Sparkles, AlertTriangle, FileText, Loader2, GitCompare, ArrowRight, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import * as XLSX from "xlsx";
@@ -217,10 +217,15 @@ export function DocumentoRevisaoView({ documentoId, onAprovado }: { documentoId:
                 <Campo label="Competência" valor={classificacao.competencia ?? formatCompetencia(doc.competencia)} />
               </div>
               {dadosTexto && (
-                <div>
-                  <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Dados extraídos</div>
-                  <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-muted/40 p-3 text-xs">{dadosTexto}</pre>
-                </div>
+                <details className="group rounded-lg border border-border bg-muted/40">
+                  <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground">
+                    <ChevronRight className="h-3.5 w-3.5 transition-transform group-open:rotate-90" />
+                    Dados extraídos
+                    <span className="ml-auto text-[10px] font-normal normal-case text-muted-foreground/70 group-open:hidden">ver</span>
+                    <span className="ml-auto hidden text-[10px] font-normal normal-case text-muted-foreground/70 group-open:inline">ocultar</span>
+                  </summary>
+                  <pre className="max-h-72 overflow-auto whitespace-pre-wrap border-t border-border bg-card p-3 text-xs">{dadosTexto}</pre>
+                </details>
               )}
               {classificacao.observacoes && (
                 <div>
