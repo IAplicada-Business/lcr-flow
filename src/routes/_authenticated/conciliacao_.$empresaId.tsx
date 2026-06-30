@@ -356,7 +356,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
           </div>
           <div className="flex items-center gap-2">
             {aRever > 0 && <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700"><AlertTriangle className="h-3 w-3" /> {aRever} a revisar</span>}
-            <Button size="sm" onClick={() => abrirNovo()}><Plus className="mr-1 h-3.5 w-3.5" />Incluir lançamento</Button>
+            <Button size="sm" onClick={() => abrirNovo()}><Plus className="mr-1 h-3.5 w-3.5" />Adicionar manual</Button>
           </div>
         </div>
         <CardContent className="p-0">
@@ -402,7 +402,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
                     </TableRow>
                   );
                 })}
-                {!lancLoading && lancs.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Nenhum lançamento nesta competência. Use “Incluir lançamento” para adicionar manualmente.</TableCell></TableRow>}
+                {!lancLoading && lancs.length === 0 && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Nenhum lançamento nesta competência. Use “Adicionar manual” para incluir um lançamento que não veio via documento processado (ex.: fluxo de caixa, ajustes contábeis).</TableCell></TableRow>}
                 {lancLoading && <TableRow><TableCell colSpan={6} className="py-8 text-center text-muted-foreground">Carregando…</TableCell></TableRow>}
               </TableBody>
             </Table>
@@ -457,7 +457,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" onClick={() => abrirNovo()}><Plus className="mr-1 h-4 w-4" /> Incluir lançamento</Button>
+                  <Button size="sm" variant="outline" onClick={() => abrirNovo()}><Plus className="mr-1 h-4 w-4" /> Adicionar manual</Button>
                   <Button size="sm" disabled={acting || selRazao === null || selExtrato === null} onClick={conciliarManual}>
                     <Link2 className="mr-1 h-4 w-4" /> Conciliar par selecionado
                   </Button>
@@ -487,7 +487,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
 
       <Dialog open={!!novo} onOpenChange={(o) => !o && setNovo(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle className="font-display text-2xl">Incluir lançamento</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle className="font-display text-2xl">Adicionar lançamento manual</DialogTitle></DialogHeader>
           {novo && (
             <div className="space-y-4">
               <div className="space-y-1.5"><Label>Conta contábil</Label><ContaCombobox value={novo.conta_codigo} onChange={(codigo) => setNovo({ ...novo, conta_codigo: codigo })} /></div>
@@ -496,7 +496,10 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
                 <div className="space-y-1.5"><Label>Data (AAAA-MM-DD)</Label><Input value={novo.data} onChange={(e) => setNovo({ ...novo, data: e.target.value })} placeholder="2026-06-30" /></div>
                 <div className="space-y-1.5"><Label>Valor</Label><Input value={novo.valor} onChange={(e) => setNovo({ ...novo, valor: e.target.value })} placeholder="1234.56" /></div>
               </div>
-              <p className="text-[11px] text-muted-foreground">O lançamento entra como <strong>validado</strong> na competência {formatCompetencia(competencia)}.</p>
+              <p className="text-[11px] text-muted-foreground">
+                Use para lançamentos que <strong>não vieram via documento processado</strong> — fluxo de caixa,
+                ajustes contábeis pontuais, adições do contador. Entra como <strong>validado</strong> na competência {formatCompetencia(competencia)}.
+              </p>
             </div>
           )}
           <DialogFooter>
