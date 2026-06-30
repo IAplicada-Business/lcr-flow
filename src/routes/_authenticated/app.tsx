@@ -4,14 +4,15 @@ import { useState } from "react";
 import { PageHeader } from "@/components/app-shell";
 import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { getDashboardStats } from "@/lib/lcr.functions";
-import { EMPRESA_STATUS_LABEL, formatCompetencia, competenciaAtual, ultimasCompetencias } from "@/lib/format";
+import { EMPRESA_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
 import {
   Building2, FileClock, BookOpen, GitCompare, AlertTriangle, ListTodo, ArrowRight,
-  Activity, FileText, TrendingUp, TrendingDown, Sparkles, Crown, Scale,
+  Activity, FileText, TrendingUp, TrendingDown, Sparkles, Crown, Scale, Calendar, ChevronDown, Check,
 } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Button } from "@/components/ui/button";
 import {
   ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid,
   RadialBarChart, RadialBar, PieChart, Pie, Cell,
@@ -79,15 +80,85 @@ function Delta({ pct }: { pct: number }) {
   );
 }
 
+// Multi-select compacto para mês/ano. Toggle por item, sem ok/cancel.
+function MultiPicker<T extends number>({ icon, label, valueLabel, items, selected, onChange }: {
+  icon: React.ReactNode; label: string; valueLabel: string;
+  items: { value: T; label: string }[];
+  selected: Set<T>;
+  onChange: (next: Set<T>) => void;
+}) {
+  function toggle(v: T) {
+    const next = new Set(selected);
+    if (next.has(v)) next.delete(v); else next.add(v);
+    onChange(next);
+  }
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="ghost" size="sm" className="h-9 gap-1.5 rounded-full px-3 text-xs font-medium hover:bg-muted">
+          <span className="text-muted-foreground">{icon}</span>
+          <span className="text-muted-foreground">{label}:</span>
+          <span className="truncate max-w-[140px] text-foreground">{valueLabel}</span>
+          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-44 p-1">
+        <div className="flex items-center justify-between px-2 py-1.5 border-b border-border">
+          <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</span>
+          <button onClick={() => onChange(new Set())} className="text-[10px] font-medium text-primary hover:underline">limpar</button>
+        </div>
+        <div className="max-h-72 overflow-y-auto py-1">
+          {items.map((it) => {
+            const on = selected.has(it.value);
+            return (
+              <button
+                key={it.value}
+                onClick={() => toggle(it.value)}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-sm transition-colors",
+                  on ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground",
+                )}
+              >
+                <span>{it.label}</span>
+                {on && <Check className="h-3.5 w-3.5" />}
+              </button>
+            );
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+const MESES_LABEL = ["Jan", "Fev", "Mar", "Abr", "Mai", "Jun", "Jul", "Ago", "Set", "Out", "Nov", "Dez"];
+
 function Dashboard() {
-  const [comp, setComp] = useState(competenciaAtual());
+  const hoje = useState(competenciaAtual())[0];
+  const [yyAtual, mmAtual] = hoje.split("-").map(Number);
+  const [meses, setMeses] = useState<Set<number>>(new Set([mmAtual]));
+  const [anos, setAnos] = useState<Set<number>>(new Set([yyAtual]));
+  // Anos disponíveis = ano atual e os 3 anteriores.
+  const anosDisponiveis = [yyAtual, yyAtual - 1, yyAtual - 2, yyAtual - 3];
+  // Cross product mês × ano → lista de competências ordenadas. Garante pelo
+  // menos a competência atual se o usuário esvaziar tudo.
+  const competencias = (() => {
+    const xs: string[] = [];
+    const ms = meses.size > 0 ? [...meses] : [mmAtual];
+    const ys = anos.size > 0 ? [...anos] : [yyAtual];
+    ys.forEach((y) => ms.forEach((m) => xs.push(`${y}-${String(m).padStart(2, "0")}`)));
+    return xs.sort();
+  })();
+  const compKey = competencias.join(",");
   const { data } = useQuery({
-    queryKey: ["dashboard", comp],
-    queryFn: () => getDashboardStats({ data: { competencia: comp } }),
+    queryKey: ["dashboard", compKey],
+    queryFn: () => getDashboardStats({ data: { competencias } }),
     placeholderData: keepPreviousData,
     refetchInterval: 5000,
   });
   if (!data) return null;
+
+  const labelMeses = meses.size === 0 ? "Mês atual" : meses.size === 12 ? "Todos os meses" : [...meses].sort((a, b) => a - b).map((m) => MESES_LABEL[m - 1]).join(", ");
+  const labelAnos = anos.size === 0 ? "Ano atual" : anos.size === 1 ? String([...anos][0]) : [...anos].sort().join(", ");
 
   const maxFase = Math.max(1, ...data.fases.map((f) => f.total));
   const faseDestaque = data.fases.reduce((acc, f) => (f.total > acc.total ? f : acc), data.fases[0]);
@@ -100,33 +171,45 @@ function Dashboard() {
 
   return (
     <Tabs defaultValue="operacao" className="space-y-5">
-      <PageHeader
-        title="Visão geral"
-        actions={
-          <Select value={comp} onValueChange={setComp}>
-            <SelectTrigger className="w-44 rounded-full"><SelectValue placeholder="Competência" /></SelectTrigger>
-            <SelectContent>
-              {ultimasCompetencias(12).map((c) => <SelectItem key={c} value={c}>{formatCompetencia(c)}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        }
-      />
+      <PageHeader title="Visão geral" />
 
-      {/* Sub-abas logo abaixo do título */}
-      <TabsList className="h-auto rounded-full bg-card p-1.5 shadow-soft">
-        <TabsTrigger value="operacao" className="gap-1.5 rounded-full px-4 py-2 data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=active]:shadow-sm">
-          <Activity className="h-3.5 w-3.5" /> Operação
-        </TabsTrigger>
-        <TabsTrigger value="carteira" className="gap-1.5 rounded-full px-4 py-2 data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=active]:shadow-sm">
-          <Building2 className="h-3.5 w-3.5" /> Carteira
-        </TabsTrigger>
-        <TabsTrigger value="documentos" className="gap-1.5 rounded-full px-4 py-2 data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=active]:shadow-sm">
-          <FileText className="h-3.5 w-3.5" /> Documentos
-        </TabsTrigger>
-        <TabsTrigger value="conciliacao" className="gap-1.5 rounded-full px-4 py-2 data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=active]:shadow-sm">
-          <GitCompare className="h-3.5 w-3.5" /> Conciliação
-        </TabsTrigger>
-      </TabsList>
+      {/* Sub-abas logo abaixo do título + filtros mês/ano alinhados à direita */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <TabsList className="h-auto rounded-full bg-card p-1.5 shadow-soft">
+          <TabsTrigger value="operacao" className="gap-1.5 rounded-full px-4 py-2 data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=active]:shadow-sm">
+            <Activity className="h-3.5 w-3.5" /> Operação
+          </TabsTrigger>
+          <TabsTrigger value="carteira" className="gap-1.5 rounded-full px-4 py-2 data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=active]:shadow-sm">
+            <Building2 className="h-3.5 w-3.5" /> Carteira
+          </TabsTrigger>
+          <TabsTrigger value="documentos" className="gap-1.5 rounded-full px-4 py-2 data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=active]:shadow-sm">
+            <FileText className="h-3.5 w-3.5" /> Documentos
+          </TabsTrigger>
+          <TabsTrigger value="conciliacao" className="gap-1.5 rounded-full px-4 py-2 data-[state=active]:bg-foreground data-[state=active]:text-background data-[state=active]:shadow-sm">
+            <GitCompare className="h-3.5 w-3.5" /> Conciliação
+          </TabsTrigger>
+        </TabsList>
+
+        <div className="inline-flex items-center rounded-full bg-card p-1.5 shadow-soft">
+          <MultiPicker
+            icon={<Calendar className="h-3.5 w-3.5" />}
+            label="Mês"
+            valueLabel={labelMeses}
+            items={MESES_LABEL.map((l, i) => ({ value: i + 1, label: l }))}
+            selected={meses}
+            onChange={setMeses}
+          />
+          <span className="mx-1 h-5 w-px bg-border" />
+          <MultiPicker
+            icon={<Calendar className="h-3.5 w-3.5" />}
+            label="Ano"
+            valueLabel={labelAnos}
+            items={anosDisponiveis.map((y) => ({ value: y, label: String(y) }))}
+            selected={anos}
+            onChange={setAnos}
+          />
+        </div>
+      </div>
 
       {/* HERO — painel principal navy com KPIs grandes + sparkline integrada */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

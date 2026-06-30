@@ -14,12 +14,23 @@ const competenciaInput = z.object({ competencia: z.string().optional() }).option
 
 export const getDashboardStats = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .inputValidator((d: unknown) => z.object({ competencia: z.string().regex(/^\d{4}-\d{2}$/).optional() }).optional().parse(d ?? {}))
+  .inputValidator((d: unknown) => z.object({
+    competencia: z.string().regex(/^\d{4}-\d{2}$/).optional(),
+    competencias: z.array(z.string().regex(/^\d{4}-\d{2}$/)).max(60).optional(),
+  }).optional().parse(d ?? {}))
   .handler(async ({ context, data }) => {
     const { supabase } = context;
-    const competencia = data?.competencia ?? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const padrao = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    // Lista efetiva de competências (multi-mês × multi-ano). Se nada vier,
+    // usa a competência atual.
+    const competenciasSel = (data?.competencias && data.competencias.length > 0)
+      ? Array.from(new Set(data.competencias)).sort()
+      : [data?.competencia ?? padrao];
+    // Competência "âncora" = a mais recente — usada para delta vs mês anterior
+    // e como fim da janela de 6 meses da série temporal.
+    const competencia = competenciasSel[competenciasSel.length - 1];
 
-    // Últimas 6 competências (incluindo a selecionada) para série temporal.
+    // Últimas 6 competências terminando na âncora.
     const seisMeses: string[] = [];
     {
       const [yy, mm] = competencia.split("-").map(Number);
@@ -34,8 +45,8 @@ export const getDashboardStats = createServerFn({ method: "GET" })
     const [empresas, docsAguardando, lancamentosMes, conciliacoesPendentes, fases, atencaoUrgente, docsRows, conciliacoesRows, tarefasRows, serieLanc, serieConcil, lancMesAnterior, empresasRegime, topClientesRaw] = await Promise.all([
       supabase.from("empresas").select("id", { count: "exact", head: true }),
       supabase.from("documentos").select("id", { count: "exact", head: true }).in("status", ["recebido", "classificado"]),
-      supabase.from("lancamentos").select("id", { count: "exact", head: true }).eq("competencia", competencia),
-      supabase.from("conciliacoes").select("id", { count: "exact", head: true }).eq("competencia", competencia).neq("status", "concluida"),
+      supabase.from("lancamentos").select("id", { count: "exact", head: true }).in("competencia", competenciasSel),
+      supabase.from("conciliacoes").select("id", { count: "exact", head: true }).in("competencia", competenciasSel).neq("status", "concluida"),
       supabase.from("empresas").select("status"),
       supabase
         .from("empresas")
@@ -43,13 +54,13 @@ export const getDashboardStats = createServerFn({ method: "GET" })
         .in("status", ["atrasado", "cobranca"])
         .limit(8),
       supabase.from("documentos").select("status"),
-      supabase.from("conciliacoes").select("status").eq("competencia", competencia),
+      supabase.from("conciliacoes").select("status").in("competencia", competenciasSel),
       supabase.from("tarefas").select("status"),
       supabase.from("lancamentos").select("competencia").in("competencia", seisMeses),
       supabase.from("conciliacoes").select("competencia, status").in("competencia", seisMeses),
       supabase.from("lancamentos").select("id", { count: "exact", head: true }).eq("competencia", compAnterior),
       supabase.from("empresas").select("regime"),
-      supabase.from("lancamentos").select("empresa_id, empresas(razao_social)").eq("competencia", competencia).limit(2000),
+      supabase.from("lancamentos").select("empresa_id, empresas(razao_social)").in("competencia", competenciasSel).limit(2000),
     ]);
 
     const faseCounts: Record<string, number> = { cobranca: 0, lancamento: 0, conciliacao: 0, entregue: 0 };
@@ -66,14 +77,15 @@ export const getDashboardStats = createServerFn({ method: "GET" })
     };
 
     const docsByStatus = countBy(docsRows.data, ["recebido", "classificado", "processado", "conciliado", "erro"]);
-    // Conciliação por status = foto do mês de TODOS os clientes: quem não iniciou
-    // conciliação na competência conta como "não iniciada".
+    // Conciliação por status = foto das competências selecionadas para TODOS os
+    // clientes. Quem não iniciou conciliação na competência conta como
+    // "não iniciada". Com multi-competência o "total esperado" é empresas × N.
     const totalEmpresas = empresas.count ?? 0;
     const conciliacoesByStatus = countBy(conciliacoesRows.data, ["nao_iniciada", "em_andamento", "divergencias", "concluida"]);
     const iniciadas = (conciliacoesRows.data ?? []).length;
-    conciliacoesByStatus.nao_iniciada += Math.max(0, totalEmpresas - iniciadas);
+    const totalConciliacoes = totalEmpresas * competenciasSel.length;
+    conciliacoesByStatus.nao_iniciada += Math.max(0, totalConciliacoes - iniciadas);
     const totalDocs = (docsRows.data ?? []).length;
-    const totalConciliacoes = totalEmpresas;
     const tarefasAbertas = (tarefasRows.data ?? []).filter((t) => !["done", "concluida"].includes(t.status)).length;
 
     // Série dos últimos 6 meses: lançamentos + conciliações concluídas por mês.
@@ -131,12 +143,13 @@ export const getDashboardStats = createServerFn({ method: "GET" })
 
     return {
       competencia,
+      competencias: competenciasSel,
       clientesAtivos: empresas.count ?? 0,
       docsAguardando: docsAguardando.count ?? 0,
       lancamentosMes: lancAtual,
       lancamentosMesAnterior: lancAnt,
       deltaLanc,
-      conciliacoesPendentes: Math.max(0, totalEmpresas - conciliacoesByStatus.concluida),
+      conciliacoesPendentes: Math.max(0, totalConciliacoes - conciliacoesByStatus.concluida),
       tarefasAbertas,
       totalDocs,
       totalConciliacoes,
