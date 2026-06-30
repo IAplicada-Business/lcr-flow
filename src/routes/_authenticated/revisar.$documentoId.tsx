@@ -5,8 +5,9 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusPill } from "@/components/status-pill";
-import { getDocumentoRevisao, aprovarDocumento, limparLancamentosDocumento } from "@/lib/lcr.functions";
+import { getDocumentoRevisao, aprovarDocumento, limparLancamentosDocumento, mudarTipoDocumento } from "@/lib/lcr.functions";
 import { DOC_TIPO_LABEL, formatCompetencia } from "@/lib/format";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { requireAcesso } from "@/lib/guard";
 import { ChevronLeft, CheckCircle2, Sparkles, AlertTriangle, FileText, Loader2, GitCompare, ArrowRight, FileSpreadsheet } from "lucide-react";
@@ -98,6 +99,22 @@ export function DocumentoRevisaoView({ documentoId, onAprovado }: { documentoId:
     } finally { setBusy(null); }
   }
 
+  async function mudarTipo(novo: string) {
+    if (!doc || doc.tipo === novo) return;
+    try {
+      const res = await mudarTipoDocumento({ data: { id: documentoId, tipo: novo as "extrato" } });
+      await qc.invalidateQueries({ queryKey: key });
+      await qc.invalidateQueries({ queryKey: ["documentos"] });
+      await qc.invalidateQueries({ queryKey: ["conciliacao-detalhe"] });
+      await qc.invalidateQueries({ queryKey: ["lanc-conc"] });
+      router.invalidate();
+      if (res.mudou && novo === "extrato") toast.success("Tipo alterado para extrato — vinculado à Conciliação bancária.");
+      else if (res.mudou) toast.success(`Tipo alterado para ${DOC_TIPO_LABEL[novo as keyof typeof DOC_TIPO_LABEL]}.`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro");
+    }
+  }
+
   async function reclassificar() {
     setBusy("reclassificar");
     try {
@@ -183,7 +200,20 @@ export function DocumentoRevisaoView({ documentoId, onAprovado }: { documentoId:
                 </div>
               )}
               <div className="grid grid-cols-2 gap-3">
-                <Campo label="Tipo identificado" valor={classificacao.tipo_documento ?? "—"} />
+                <div>
+                  <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Tipo do documento</div>
+                  <Select value={doc.tipo} onValueChange={mudarTipo}>
+                    <SelectTrigger className="mt-0.5 h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {(["extrato", "nf_entrada", "nf_saida", "fatura_cartao", "recibo", "darf", "planilha_financeira", "movimento_contabil", "outros"] as const).map((t) => (
+                        <SelectItem key={t} value={t}>{DOC_TIPO_LABEL[t]}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {classificacao.tipo_documento && classificacao.tipo_documento.toLowerCase() !== doc.tipo && (
+                    <div className="mt-1 text-[10px] text-muted-foreground">IA sugeriu: {classificacao.tipo_documento}</div>
+                  )}
+                </div>
                 <Campo label="Competência" valor={classificacao.competencia ?? formatCompetencia(doc.competencia)} />
               </div>
               {dadosTexto && (

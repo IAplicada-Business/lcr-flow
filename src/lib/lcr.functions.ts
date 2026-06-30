@@ -971,6 +971,62 @@ export const limparLancamentosDocumento = createServerFn({ method: "POST" })
     return { ok: true };
   });
 
+// Mudança manual do tipo do documento (quando a IA classifica errado).
+// Quando o novo tipo é 'extrato', limpa lançamentos órfãos (que estavam
+// pendurados no documento como se fosse NF/planilha) e vincula o arquivo
+// como extrato_csv_url na conciliação da competência.
+export const mudarTipoDocumento = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({
+      id: z.string().uuid(),
+      tipo: z.enum(["extrato", "nf_entrada", "nf_saida", "fatura_cartao", "recibo", "darf", "planilha_financeira", "movimento_contabil", "outros"]),
+    }).parse(d),
+  )
+  .handler(async ({ context, data }) => {
+    const { data: doc, error: getErr } = await context.supabase
+      .from("documentos")
+      .select("id, empresa_id, competencia, tipo, storage_path, arquivo_url, arquivo_nome")
+      .eq("id", data.id)
+      .maybeSingle();
+    if (getErr) throw new Error(getErr.message);
+    if (!doc) throw new Error("Documento não encontrado.");
+    if (doc.tipo === data.tipo) return { ok: true, mudou: false };
+
+    if (data.tipo === "extrato") {
+      const competencia = doc.competencia ?? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+      // limpa lançamentos órfãos gerados quando o doc era de outro tipo
+      await context.supabase.from("lancamentos").delete().eq("documento_id", data.id);
+      // espelha o arquivo no bucket conciliacoes
+      const srcBucket = doc.storage_path ? "documentos-clientes" : "documentos";
+      const srcPath = doc.storage_path ?? doc.arquivo_url;
+      if (srcPath) {
+        const { data: file } = await context.supabase.storage.from(srcBucket).download(srcPath);
+        if (file) {
+          const safeName = (doc.arquivo_nome ?? "extrato").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+          const concPath = `${doc.empresa_id}/${competencia}/extrato-${crypto.randomUUID()}-${safeName}`;
+          await context.supabase.storage.from("conciliacoes").upload(concPath, file, { upsert: false, cacheControl: "3600", contentType: file.type || "application/octet-stream" });
+          // vincula à conciliação (cria se não existir)
+          const { data: existente } = await context.supabase
+            .from("conciliacoes").select("id").eq("empresa_id", doc.empresa_id).eq("competencia", competencia).maybeSingle();
+          if (existente) {
+            await context.supabase.from("conciliacoes").update({ extrato_csv_url: concPath, status: "em_andamento" }).eq("id", existente.id);
+          } else {
+            await context.supabase.from("conciliacoes")
+              .insert({ empresa_id: doc.empresa_id, competencia, extrato_csv_url: concPath, status: "em_andamento" } as never);
+          }
+        }
+      }
+      await context.supabase.from("documentos").update({
+        tipo: "extrato", lancamentos_gerados: 0,
+        status: "processado", status_processamento: "classificado",
+      }).eq("id", data.id);
+    } else {
+      await context.supabase.from("documentos").update({ tipo: data.tipo }).eq("id", data.id);
+    }
+    return { ok: true, mudou: true };
+  });
+
 // Garante a conciliação (empresa_id, competencia) e retorna o id.
 export const ensureConciliacao = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
