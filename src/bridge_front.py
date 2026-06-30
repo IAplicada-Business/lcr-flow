@@ -23,7 +23,9 @@ import os
 import sys
 import csv
 import json
+import re
 import time
+import unicodedata
 import argparse
 import subprocess
 import datetime as dt
@@ -284,7 +286,7 @@ def processar_extrato(empresa_id, competencia, extrato_path, banco_cod, jwt, ori
     competencia_id = ensure_competencia(empresa_id, competencia)
 
     log("\n[4] Upload do extrato + registro em documentos...")
-    storage_path = f"{empresa_id}/{competencia}/{extrato_path.name}"
+    storage_path = f"{empresa_id}/{competencia}/{_safe_storage_name(extrato_path.name)}"
     sb_upload(BUCKET_DOCS, storage_path, extrato_path.read_bytes(), "application/pdf")
     doc = sb_insert("documentos", {
         "empresa_id": empresa_id, "tipo": "extrato", "competencia": competencia,
@@ -438,6 +440,18 @@ def mime_de(p: Path) -> str:
     return MIME_POR_EXT.get(p.suffix.lower(), "application/pdf")
 
 
+def _safe_storage_name(nome: str) -> str:
+    """Chave de storage segura p/ o Supabase (evita 400 InvalidKey com acentos/
+    espaços/caracteres especiais). Mantém a extensão; o nome legível original
+    permanece em documentos.arquivo_nome."""
+    p = Path(nome)
+    base = unicodedata.normalize("NFKD", p.stem).encode("ascii", "ignore").decode("ascii")
+    ext = unicodedata.normalize("NFKD", p.suffix).encode("ascii", "ignore").decode("ascii")
+    base = re.sub(r"[^A-Za-z0-9._-]+", "_", base).strip("._") or "arquivo"
+    ext = re.sub(r"[^A-Za-z0-9.]+", "", ext)
+    return f"{base}{ext}"
+
+
 def processar_documento_edge(empresa_id, competencia, competencia_id, file_path, tipo, jwt, origem="gestta"):
     """Documentos não-extrato: sobe no Storage, cria documentos e deixa a edge
     function processar-documento classificar e gerar lançamentos."""
@@ -470,7 +484,7 @@ def processar_documento_edge(empresa_id, competencia, competencia_id, file_path,
     else:
         conteudo, arquivo_nome, ctype = p.read_bytes(), p.name, mime_de(p)
 
-    storage_path = f"{empresa_id}/{competencia}/{arquivo_nome}"
+    storage_path = f"{empresa_id}/{competencia}/{_safe_storage_name(arquivo_nome)}"
     sb_upload(BUCKET_DOCS, storage_path, conteudo, ctype)
     doc = sb_insert("documentos", {
         "empresa_id": empresa_id, "tipo": tipo, "competencia": competencia,
