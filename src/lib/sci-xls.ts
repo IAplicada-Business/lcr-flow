@@ -22,6 +22,7 @@ export type SciLanc = {
   data_lancamento: string | null;
   valor: number | null;
   descricao: string | null;
+  documento_numero?: string | null;
   conta: { codigo: string; tipo: string | null; sci_apelido?: string | null } | null;
   historico: { codigo: string } | null;
 };
@@ -86,7 +87,7 @@ export function linhasSci(lancs: SciLanc[], bancoSci: number | string | "") {
         "VALOR": Math.abs(valor),
         "HISTÓRICO": l.historico?.codigo ?? "",
         "COMPLEMENTO": (l.descricao ?? "").slice(0, 80),
-        "DOCUMENTO": "",
+        "DOCUMENTO": l.documento_numero ?? "",
         "CENTRO DE CUSTO DÉB": "",
         "CENTRO DE CUSTO CRED": "",
       };
@@ -111,21 +112,25 @@ export function baixarPlanilhaSciXls(
 
 // ── Prévia para a UI (mesmo layout do modelo, com código + nome p/ leitura) ──
 export type SciLancRico = {
+  id?: string;
   data_lancamento: string | null;
   valor: number | null;
   descricao: string | null;
+  documento_numero?: string | null;
   conta: { codigo: string; descricao: string; tipo: string | null; sci_apelido?: string | null } | null;
   historico: { codigo: string; descricao: string; sci_apelido?: string | null } | null;
 };
 
 export type SciCelula = { codigo: number | string; nome: string };
 export type SciPreviewRow = {
+  id?: string;
   data: number | string;
   debito: SciCelula;
   credito: SciCelula;
   valor: number;
   historico: { codigo: string; apelido: string; nome: string };
   complemento: string;
+  documento: string;
 };
 
 /** Código SCI da conta: apelido do de-para quando existir, senão o código LCR. */
@@ -151,6 +156,7 @@ export function linhasSciPreview(
       const valor = Number(l.valor ?? 0);
       const ld = ladoPorValor(valor, l.conta!.tipo);
       return {
+        id: l.id,
         data: fmtData(l.data_lancamento),
         debito: ld === "debito" ? conta : banco,
         credito: ld === "debito" ? banco : conta,
@@ -161,6 +167,7 @@ export function linhasSciPreview(
           nome: l.historico?.descricao ?? "",
         },
         complemento: (l.descricao ?? "").slice(0, 80),
+        documento: (l.documento_numero ?? "").slice(0, 80),
       };
     });
 }

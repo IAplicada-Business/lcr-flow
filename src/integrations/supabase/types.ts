@@ -1013,6 +1013,7 @@ export type Database = {
           data_lancamento: string | null
           descricao: string | null
           documento_id: string | null
+          documento_numero: string | null
           empresa_id: string
           historico_id: string | null
           id: string
@@ -1034,6 +1035,7 @@ export type Database = {
           data_lancamento?: string | null
           descricao?: string | null
           documento_id?: string | null
+          documento_numero?: string | null
           empresa_id: string
           historico_id?: string | null
           id?: string
@@ -1055,6 +1057,7 @@ export type Database = {
           data_lancamento?: string | null
           descricao?: string | null
           documento_id?: string | null
+          documento_numero?: string | null
           empresa_id?: string
           historico_id?: string | null
           id?: string

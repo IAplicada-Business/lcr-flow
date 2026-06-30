@@ -1,7 +1,8 @@
 // Componentes das abas do Painel do Cliente. Reorganizam telas existentes
 // reaproveitando as MESMAS server functions — sem reescrever a lógica de negócio.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { Markdown } from "@/components/markdown";
-import { listDocumentos, gerarPlanilhaSci, getHistoricoCerebro, createDocumento, ensureCompetencia, listLancamentosConciliacao, getEmpresa, listPlanoContas, type SciLinha } from "@/lib/lcr.functions";
+import { listDocumentos, gerarPlanilhaSci, getHistoricoCerebro, createDocumento, ensureCompetencia, listLancamentosConciliacao, getEmpresa, listPlanoContas, editarLancamento, type SciLinha } from "@/lib/lcr.functions";
 import { baixarPlanilhaSciXls, bancoCodigoDe, linhasSciPreview, type SciCelula } from "@/lib/sci-xls";
 import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
 import { supabase } from "@/integrations/supabase/client";
@@ -204,6 +205,7 @@ function exportarCsv(empresa: string, competencia: string, linhas: SciLinha[]) {
 
 type SciLancDet = {
   id: string; data_lancamento: string | null; valor: number | null; descricao: string | null;
+  documento_numero?: string | null;
   conta: { codigo: string; descricao: string; tipo: string | null; sci_apelido: string | null } | null;
   historico: { codigo: string; descricao: string; sci_apelido: string | null } | null;
 };
@@ -215,6 +217,49 @@ function CelSci({ cel }: { cel: SciCelula }) {
       <span className="font-mono text-xs">{cel.codigo === "" ? "—" : cel.codigo}</span>
       {cel.nome && <div className="text-xs text-muted-foreground">{cel.nome}</div>}
     </TableCell>
+  );
+}
+
+// Célula editável inline — usada nas colunas Documento (nº NF) e Complemento.
+// Persiste no blur via editarLancamento e invalida o cache da prévia.
+function CelEditavel({ id, initial, campo, placeholder, maxLength = 80, mono = false }: {
+  id?: string; initial: string;
+  campo: "descricao" | "documento_numero";
+  placeholder: string; maxLength?: number; mono?: boolean;
+}) {
+  const qc = useQueryClient();
+  const [val, setVal] = useState(initial);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => setVal(initial), [initial]);
+
+  async function persistir() {
+    if (!id || val === initial) return;
+    setBusy(true);
+    try {
+      await editarLancamento({ data: { id, [campo]: val || "" } as { id: string; descricao?: string; documento_numero?: string } });
+      qc.invalidateQueries({ queryKey: ["lanc-conc"] });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+      setVal(initial);
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <input
+      type="text"
+      value={val}
+      onChange={(e) => setVal(e.target.value.slice(0, maxLength))}
+      onBlur={persistir}
+      onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+      placeholder={placeholder}
+      disabled={!id || busy}
+      className={cn(
+        "w-full rounded border border-transparent bg-transparent px-1.5 py-1 text-sm outline-none transition-colors",
+        "hover:border-border hover:bg-muted/40 focus:border-primary focus:bg-card",
+        mono && "font-mono text-xs",
+        busy && "opacity-50",
+      )}
+    />
   );
 }
 
@@ -285,10 +330,13 @@ export function PlanilhaSciTab({ empresaId, empresaNome, competencia }: { empres
 
 {/* Prévia da planilha SCI (layout do modelo de importação, por lançamento) */}
       <Card>
-        <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-6 py-3">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/40 px-6 py-3">
           <FileSpreadsheet className="h-4 w-4 text-primary" />
           <h4 className="font-display text-lg">Prévia da planilha SCI</h4>
           <span className="text-xs text-muted-foreground">· layout de importação · {previewRows.length} lançamento(s)</span>
+          <span className="ml-auto rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-medium text-primary">
+            Edite Complemento e Documento direto na tabela — salva automaticamente
+          </span>
         </div>
         <CardContent className="p-0">
           <div className="max-h-[28rem] overflow-auto">
@@ -321,8 +369,12 @@ export function PlanilhaSciTab({ empresaId, empresaNome, competencia }: { empres
                       <span className="font-mono text-xs">{r.historico.codigo || "—"}{r.historico.apelido && ` · ${r.historico.apelido}`}</span>
                       {r.historico.nome && <div className="text-xs text-muted-foreground">{r.historico.nome}</div>}
                     </TableCell>
-                    <TableCell className="max-w-[16rem] truncate text-sm" title={r.complemento}>{r.complemento}</TableCell>
-                    <TableCell className="text-center text-muted-foreground">—</TableCell>
+                    <TableCell className="max-w-[16rem] p-1.5">
+                      <CelEditavel id={r.id} initial={r.complemento} campo="descricao" placeholder="complemento contábil" maxLength={200} />
+                    </TableCell>
+                    <TableCell className="w-32 p-1.5">
+                      <CelEditavel id={r.id} initial={r.documento} campo="documento_numero" placeholder="nº NF / doc" maxLength={40} mono />
+                    </TableCell>
                     <TableCell className="text-center text-muted-foreground">—</TableCell>
                     <TableCell className="text-center text-muted-foreground">—</TableCell>
                   </TableRow>
