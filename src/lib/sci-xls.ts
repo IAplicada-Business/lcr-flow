@@ -35,7 +35,7 @@ export function bancoCodigoDe(bancoNome: string | null | undefined): number | nu
   return null;
 }
 
-function lado(tipo: string | null): "debito" | "credito" {
+export function ladoConta(tipo: string | null): "debito" | "credito" {
   const t = (tipo ?? "").toLowerCase();
   if (TIPOS_DEBITO.some((x) => t.includes(x))) return "debito";
   if (TIPOS_CREDITO.some((x) => t.includes(x))) return "credito";
@@ -55,7 +55,7 @@ export function linhasSci(lancs: SciLanc[], bancoCodigo: number | null) {
     .map((l) => {
       const conta = Number(l.conta!.codigo);
       const banco: number | "" = bancoCodigo ?? "";
-      const ld = lado(l.conta!.tipo);
+      const ld = ladoConta(l.conta!.tipo);
       const debito = ld === "debito" ? conta : banco;
       const credito = ld === "debito" ? banco : conta;
       return {
@@ -88,4 +88,47 @@ export function baixarPlanilhaSciXls(
   const nome = `${empresaNome} - Lancamentos ${competencia}.xls`;
   XLSX.writeFile(wb, nome, { bookType: "biff8" });
   return rows.length;
+}
+
+// ── Prévia para a UI (mesmo layout do modelo, com código + nome p/ leitura) ──
+export type SciLancRico = {
+  data_lancamento: string | null;
+  valor: number | null;
+  descricao: string | null;
+  conta: { codigo: string; descricao: string; tipo: string | null } | null;
+  historico: { codigo: string; descricao: string } | null;
+};
+
+export type SciCelula = { codigo: number | string; nome: string };
+export type SciPreviewRow = {
+  data: number | string;
+  debito: SciCelula;
+  credito: SciCelula;
+  valor: number;
+  historico: { codigo: string; nome: string };
+  complemento: string;
+};
+
+/** Monta as linhas da prévia (uma por lançamento), reproduzindo o layout do modelo
+ *  com código + nome nas colunas mapeadas (débito/crédito/histórico). */
+export function linhasSciPreview(
+  lancs: SciLancRico[],
+  bancoCodigo: number | null,
+  bancoNome: string,
+): SciPreviewRow[] {
+  return lancs
+    .filter((l) => l.conta?.codigo)
+    .map((l) => {
+      const conta: SciCelula = { codigo: Number(l.conta!.codigo), nome: l.conta!.descricao };
+      const banco: SciCelula = { codigo: bancoCodigo ?? "", nome: bancoNome || "Banco" };
+      const ld = ladoConta(l.conta!.tipo);
+      return {
+        data: fmtData(l.data_lancamento),
+        debito: ld === "debito" ? conta : banco,
+        credito: ld === "debito" ? banco : conta,
+        valor: Number(l.valor ?? 0),
+        historico: { codigo: l.historico?.codigo ?? "", nome: l.historico?.descricao ?? "" },
+        complemento: (l.descricao ?? "").slice(0, 80),
+      };
+    });
 }

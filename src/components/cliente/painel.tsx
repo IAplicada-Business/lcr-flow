@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { Markdown } from "@/components/markdown";
 import { listDocumentos, gerarPlanilhaSci, getHistoricoCerebro, createDocumento, ensureCompetencia, listLancamentosConciliacao, getEmpresa, type SciLinha } from "@/lib/lcr.functions";
-import { baixarPlanilhaSciXls, bancoCodigoDe } from "@/lib/sci-xls";
+import { baixarPlanilhaSciXls, bancoCodigoDe, linhasSciPreview, type SciCelula } from "@/lib/sci-xls";
 import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
 import { supabase } from "@/integrations/supabase/client";
 import { Sparkles, Loader2, ClipboardCheck, Download, FileSpreadsheet, X, Plus, Eye } from "lucide-react";
@@ -217,6 +217,16 @@ function KpiSci({ label, value, tone }: { label: string; value: string; tone?: "
   );
 }
 
+// Célula código + nome para a prévia da planilha (débito/crédito).
+function CelSci({ cel }: { cel: SciCelula }) {
+  return (
+    <TableCell className="text-sm">
+      <span className="font-mono text-xs">{cel.codigo === "" ? "—" : cel.codigo}</span>
+      {cel.nome && <div className="text-xs text-muted-foreground">{cel.nome}</div>}
+    </TableCell>
+  );
+}
+
 export function PlanilhaSciTab({ empresaId, empresaNome, competencia }: { empresaId: string; empresaNome: string; competencia: string }) {
   const [linhas, setLinhas] = useState<SciLinha[] | null>(null);
   const [totais, setTotais] = useState<{ lanc: number; valor: number }>({ lanc: 0, valor: 0 });
@@ -232,6 +242,8 @@ export function PlanilhaSciTab({ empresaId, empresaNome, competencia }: { empres
   const { data: emp } = useQuery({ queryKey: ["empresa", empresaId], queryFn: () => getEmpresa({ data: { id: empresaId } }) });
   const contasBanc = (emp as { contas_bancarias?: { banco: string | null }[] } | undefined)?.contas_bancarias ?? [];
   const bancoCodigo = bancoCodigoDe(contasBanc[0]?.banco ?? null);
+  const bancoNome = contasBanc[0]?.banco ?? "";
+  const previewRows = linhasSciPreview(lancs, bancoCodigo, bancoNome);
 
   function baixarXls() {
     const n = baixarPlanilhaSciXls(empresaNome, competencia, lancs, bancoCodigo);
@@ -278,6 +290,57 @@ export function PlanilhaSciTab({ empresaId, empresaNome, competencia }: { empres
         <KpiSci label="Total da competência" value={`R$ ${brl(totalGeral)}`} tone="ok" />
         <KpiSci label="Planilha" value={linhas ? "Gerada" : "Pendente"} />
       </div>
+
+      {/* Prévia da planilha SCI (layout do modelo de importação, por lançamento) */}
+      <Card>
+        <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-6 py-3">
+          <FileSpreadsheet className="h-4 w-4 text-primary" />
+          <h4 className="font-display text-lg">Prévia da planilha SCI</h4>
+          <span className="text-xs text-muted-foreground">· layout de importação · {previewRows.length} lançamento(s)</span>
+        </div>
+        <CardContent className="p-0">
+          <div className="max-h-[28rem] overflow-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="whitespace-nowrap">DATA</TableHead>
+                  <TableHead>DÉBITO</TableHead>
+                  <TableHead>CRÉDITO</TableHead>
+                  <TableHead className="text-center">PART DÉB</TableHead>
+                  <TableHead className="text-center">PART CRED</TableHead>
+                  <TableHead className="text-right">VALOR</TableHead>
+                  <TableHead>HISTÓRICO</TableHead>
+                  <TableHead>COMPLEMENTO</TableHead>
+                  <TableHead className="text-center">DOCUMENTO</TableHead>
+                  <TableHead className="text-center whitespace-nowrap">C.CUSTO DÉB</TableHead>
+                  <TableHead className="text-center whitespace-nowrap">C.CUSTO CRED</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {previewRows.map((r, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="whitespace-nowrap font-mono text-xs">{r.data}</TableCell>
+                    <CelSci cel={r.debito} />
+                    <CelSci cel={r.credito} />
+                    <TableCell className="text-center text-muted-foreground">—</TableCell>
+                    <TableCell className="text-center text-muted-foreground">—</TableCell>
+                    <TableCell className="text-right font-mono text-sm">{brl(r.valor)}</TableCell>
+                    <TableCell className="text-sm">
+                      <span className="font-mono text-xs">{r.historico.codigo || "—"}</span>
+                      {r.historico.nome && <div className="text-xs text-muted-foreground">{r.historico.nome}</div>}
+                    </TableCell>
+                    <TableCell className="max-w-[16rem] truncate text-sm" title={r.complemento}>{r.complemento}</TableCell>
+                    <TableCell className="text-center text-muted-foreground">—</TableCell>
+                    <TableCell className="text-center text-muted-foreground">—</TableCell>
+                    <TableCell className="text-center text-muted-foreground">—</TableCell>
+                  </TableRow>
+                ))}
+                {previewRows.length === 0 && <TableRow><TableCell colSpan={11} className="py-6 text-center text-muted-foreground">Nenhum lançamento com conta nesta competência.</TableCell></TableRow>}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Agregado por conta (SCI) */}
       <Card>
