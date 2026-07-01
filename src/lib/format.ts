@@ -7,16 +7,27 @@ export function formatCNPJ(v: string) {
     .replace(/(\d{4})(\d)/, "$1-$2");
 }
 
+// Competência contábil "atual" = mês anterior ao calendário. O trabalho
+// contábil de julho refere-se aos documentos/movimentações de junho — como
+// no Gestta, quando o filtro de data mostra 01/07–31/07, os documentos que
+// aparecem têm competência = Jun. Todos os defaults do sistema (dashboard,
+// upload, lançamentos, painel do cliente) devem seguir essa convenção.
 export function competenciaAtual(): string {
   const d = new Date();
+  d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
 }
 
 // Últimas N competências (mês/ano), da mais recente para a mais antiga.
+// Começa na competência atual (mês anterior ao calendário) — mesmo critério
+// de competenciaAtual(), então o usuário nunca vê no dropdown uma competência
+// "adiantada" (que ainda não fechou no calendário contábil).
 export function ultimasCompetencias(n = 12): string[] {
   const out: string[] = [];
   const d = new Date();
   d.setDate(1);
+  d.setMonth(d.getMonth() - 1);
   for (let i = 0; i < n; i++) {
     out.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
     d.setMonth(d.getMonth() - 1);
