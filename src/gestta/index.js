@@ -241,7 +241,8 @@ async function baixarDocumentosCliente(tarefaId, competencia, destino) {
     if (!(await sessaoValida(page))) throw new Error('SESSAO_EXPIRADA');
 
     await humanDelay();
-    await page.goto(urlDetalhe(tarefaId, ano, mes), { waitUntil: 'networkidle', timeout: 45000 });
+    await page.goto(urlDetalhe(tarefaId, ano, mes), { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.waitForSelector('text=DOCUMENTOS SOLICITADOS', { timeout: 30000 }).catch(() => {});
     await humanDelay(2500, 4000);
 
     // ── Passo 1: Expande a seção "DOCUMENTOS SOLICITADOS" ─────────────────
@@ -541,7 +542,8 @@ async function concluirTarefaLancamentos(tarefaId, competencia = null) {
   try {
     if (!(await sessaoValida(page))) throw new Error('SESSAO_EXPIRADA');
 
-    await page.goto(urlDetalhe(tarefaId, ano, mes), { waitUntil: 'networkidle', timeout: 45000 });
+    await page.goto(urlDetalhe(tarefaId, ano, mes), { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.waitForSelector('text=DOCUMENTOS SOLICITADOS', { timeout: 30000 }).catch(() => {});
     await humanDelay(2000, 3000);
 
     await _concluirTarefa(page, tarefaId);
@@ -652,7 +654,8 @@ async function analisarSuficienciaDocumentos(tarefaId, competencia = null) {
   try {
     if (!(await sessaoValida(page))) throw new Error('SESSAO_EXPIRADA');
 
-    await page.goto(urlDetalhe(tarefaId, ano, mes), { waitUntil: 'networkidle', timeout: 45000 });
+    await page.goto(urlDetalhe(tarefaId, ano, mes), { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.waitForSelector('text=DOCUMENTOS SOLICITADOS', { timeout: 30000 }).catch(() => {});
     // Espera Angular hidratar antes de tocar em qualquer coisa
     await page.waitForSelector('button[ng-click="taskDetails.actions.openCustomerDetailsModal()"]', { timeout: 20000 }).catch(() => {});
     await humanDelay(2500, 4000);
@@ -763,7 +766,8 @@ async function marcarChecklistEConcluir(tarefaId, competencia = null) {
   try {
     if (!(await sessaoValida(page))) throw new Error('SESSAO_EXPIRADA');
 
-    await page.goto(urlDetalhe(tarefaId, ano, mes), { waitUntil: 'networkidle', timeout: 45000 });
+    await page.goto(urlDetalhe(tarefaId, ano, mes), { waitUntil: 'domcontentloaded', timeout: 45000 });
+    await page.waitForSelector('text=DOCUMENTOS SOLICITADOS', { timeout: 30000 }).catch(() => {});
     await humanDelay(2500, 4000);
 
     // ── 1. Garante que o CHECKLIST está expandido ─────────────────────────
