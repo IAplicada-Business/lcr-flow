@@ -300,7 +300,7 @@ def processar_extrato(empresa_id, competencia, extrato_path, banco_cod, jwt, ori
     comp_motor = f"{competencia[5:7]}/{competencia[0:4]}"  # 2026-06 -> 06/2026
 
     log(f"\n[1] Parseando extrato: {extrato_path.name}")
-    transacoes = parsear_extrato(str(extrato_path), banco="itau")
+    transacoes = parsear_extrato(str(extrato_path), banco="itau", competencia=competencia)
     log(f"    {len(transacoes)} transações extraídas")
     if not transacoes:
         raise RuntimeError("Nenhuma transação extraída do extrato.")

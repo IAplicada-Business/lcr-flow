@@ -92,10 +92,11 @@ def detectar_banco(caminho: str) -> str:
     return 'desconhecido'
 
 
-def parsear_extrato(caminho: str, banco: str = None) -> list:
+def parsear_extrato(caminho: str, banco: str = None, competencia: str = None) -> list:
     """
     Ponto de entrada principal. Detecta o formato e parseia.
     Retorna lista padronizada de transações.
+    `competencia` (AAAA-MM) ajuda a escolher a aba certa em planilhas multi-aba.
     """
     if banco is None:
         banco = detectar_banco(caminho)
@@ -105,7 +106,7 @@ def parsear_extrato(caminho: str, banco: str = None) -> list:
     print(f"Parseando extrato: {Path(caminho).name} (banco: {banco}, formato: {extensao})")
 
     if extensao in ['.xlsx', '.xls']:
-        return parsear_excel(caminho, banco)
+        return parsear_excel(caminho, banco, competencia)
     elif extensao == '.pdf':
         return parsear_pdf(caminho, banco)
     else:
@@ -116,7 +117,7 @@ def parsear_extrato(caminho: str, banco: str = None) -> list:
 # Parsers Excel por banco
 # ─────────────────────────────────────────────
 
-def parsear_excel(caminho: str, banco: str) -> list:
+def parsear_excel(caminho: str, banco: str, competencia: str = None) -> list:
     """Parseia extrato em Excel conforme layout do banco."""
 
     parsers_excel = {
@@ -130,7 +131,8 @@ def parsear_excel(caminho: str, banco: str) -> list:
 
     parser = parsers_excel.get(banco)
     if parser:
-        return parser(caminho)
+        # Só o Itaú usa competência (p/ escolher a aba em planilha multi-aba).
+        return parser(caminho, competencia) if banco == 'itau' else parser(caminho)
     else:
         # Fallback genérico para bancos não mapeados
         return parsear_excel_generico(caminho)
@@ -148,25 +150,17 @@ def _idx_coluna(colunas, termos, excluir=(), default=None):
     return default
 
 
-def parsear_itau_excel(caminho: str) -> list:
-    """
-    Layout típico do Itaú:
-    Linha de cabeçalho variável, colunas: Data | Descrição | Valor | Saldo
-    O valor já vem com sinal (negativo = débito)
-    """
-    df = pd.read_excel(caminho, engine='xlrd' if caminho.endswith('.xls') else 'openpyxl',
-                       header=None)
-
-    # Localiza a linha de cabeçalho procurando por "Data"
+def _parsear_itau_df(df) -> list:
+    """Extrai transações de UMA planilha (dataframe, lido com header=None) no
+    layout Itaú. Retorna [] se não achar o cabeçalho (sem fallback aqui)."""
     header_row = None
     for i, row in df.iterrows():
         valores = [str(v).strip().lower() for v in row.values if pd.notna(v)]
         if any('data' in v for v in valores):
             header_row = i
             break
-
     if header_row is None:
-        return parsear_excel_generico(caminho)
+        return []
 
     colunas = list(df.iloc[header_row])
     df = df.iloc[header_row + 1:].reset_index(drop=True)
@@ -199,9 +193,58 @@ def parsear_itau_excel(caminho: str) -> list:
             })
         except (ValueError, IndexError):
             continue
-
-    print(f"  Itaú Excel: {len(transacoes)} transações extraídas")
     return transacoes
+
+
+def _competencia_ym(competencia):
+    """Normaliza competência p/ (ano, mes) como strings. Aceita AAAA-MM ou MM/AAAA."""
+    c = str(competencia or "").replace("/", "-")
+    p = [x for x in c.split("-") if x]
+    if len(p) >= 2 and len(p[0]) == 4:
+        return p[0], p[1].zfill(2)
+    if len(p) >= 2:
+        return p[1], p[0].zfill(2)
+    return None, None
+
+
+def parsear_itau_excel(caminho: str, competencia: str = None) -> list:
+    """
+    Layout Itaú (Data | Descrição | Valor | Saldo; valor com sinal).
+    Se o arquivo tiver VÁRIAS abas (ex.: planilha anual com uma aba por mês) e
+    `competencia` for informada, escolhe a aba cujas transações mais casam com a
+    competência (AAAA-MM) — evita ler a aba errada. Uma aba só = comportamento padrão.
+    """
+    engine = 'xlrd' if caminho.endswith('.xls') else 'openpyxl'
+    try:
+        sheets = pd.ExcelFile(caminho, engine=engine).sheet_names
+    except Exception:
+        sheets = [0]
+
+    if len(sheets) <= 1 or not competencia:
+        df = pd.read_excel(caminho, engine=engine, sheet_name=(sheets[0] if sheets else 0), header=None)
+        tr = _parsear_itau_df(df)
+        if not tr:
+            return parsear_excel_generico(caminho)
+        print(f"  Itaú Excel: {len(tr)} transações extraídas")
+        return tr
+
+    # Multi-aba + competência: pontua cada aba e escolhe a que melhor casa
+    # (mês exato > mesmo ano > mais transações).
+    alvo_ano, alvo_mes = _competencia_ym(competencia)
+    alvo_ym = f"{alvo_ano}-{alvo_mes}" if alvo_ano else None
+    melhor, melhor_score, melhor_sh = [], -1, None
+    for sh in sheets:
+        try:
+            tr = _parsear_itau_df(pd.read_excel(caminho, engine=engine, sheet_name=sh, header=None))
+        except Exception:
+            tr = []
+        n_ym = sum(1 for t in tr if (t.get('data') or '')[:7] == alvo_ym) if alvo_ym else 0
+        n_ano = sum(1 for t in tr if (t.get('data') or '')[:4] == alvo_ano) if alvo_ano else 0
+        score = n_ym * 10000 + n_ano * 100 + len(tr)
+        if score > melhor_score:
+            melhor, melhor_score, melhor_sh = tr, score, sh
+    print(f"  Itaú Excel (multi-aba): aba '{melhor_sh}' escolhida p/ competência {competencia} — {len(melhor)} transações")
+    return melhor
 
 
 def parsear_bradesco_excel(caminho: str) -> list:
