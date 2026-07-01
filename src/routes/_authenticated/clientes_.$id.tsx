@@ -61,7 +61,6 @@ function ClienteDetalhe() {
           </div>
         </div>
         <div className="flex items-end gap-3">
-          <EditarClienteDrawer empresa={empresa} />
           <div className="flex flex-col items-end gap-1">
             <span className="text-[11px] uppercase tracking-wide text-muted-foreground">Mês de trabalho · competência {formatCompetencia(competencia)}</span>
             <div className="inline-flex items-center rounded-full bg-card p-1 shadow-soft">
@@ -126,6 +125,9 @@ function VisaoGeralCliente({ empresaId, empresa, competencia }: { empresaId: str
     return <Card><CardContent className="py-12 text-center text-sm text-muted-foreground">Carregando análise do cliente…</CardContent></Card>;
   }
 
+  // Ação de editar cliente aparece só nesta aba — não polui as demais.
+  const acaoEditar = <div className="mb-4 flex justify-end"><EditarClienteDrawer empresa={empresa} /></div>;
+
   const { kpis, serieMensal, docsByTipo, docsEsperadosMes, docsRecentes, lancRecentes, bancosDetectados } = painel;
   const contasCad = empresa.contas_bancarias ?? [];
   const esperadosCad = empresa.documentos_esperados ?? [];
@@ -137,6 +139,7 @@ function VisaoGeralCliente({ empresaId, empresa, competencia }: { empresaId: str
 
   return (
     <div className="space-y-5">
+      {acaoEditar}
       {/* HERO — deep navy igual ao dashboard, com glow ambiente */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="relative overflow-hidden rounded-3xl bg-deep p-6 text-primary-foreground shadow-soft lg:col-span-2">

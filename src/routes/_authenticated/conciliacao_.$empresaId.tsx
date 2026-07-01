@@ -15,7 +15,7 @@ import { DOC_TIPO_LABEL } from "@/lib/format";
 import { formatCompetencia } from "@/lib/format";
 import { supabase } from "@/integrations/supabase/client";
 import { requireAcesso } from "@/lib/guard";
-import { ChevronLeft, Download, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle, FileText, Link2, Pencil, ChevronsUpDown, Check, Plus, Trash2, ArrowDownToLine, ArrowUpFromLine } from "lucide-react";
+import { ChevronLeft, Download, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle, FileText, Link2, Pencil, ChevronsUpDown, Check, Plus, Trash2, ArrowUpFromLine } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -330,8 +330,8 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
         </div>
       )}
 
-      {/* KPI strip: extrato + saldos + outros lançamentos + ação Conciliar */}
-      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      {/* KPI strip: extrato + movimentado + outros lançamentos (3 cards) */}
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <Card className="rounded-2xl border-0 shadow-soft">
           <CardContent className="p-4">
             <div className="flex items-start justify-between gap-2">
@@ -358,39 +358,18 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
         <Card className="rounded-2xl border-0 shadow-soft">
           <CardContent className="p-4">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
-              <ArrowDownToLine className="h-4 w-4" />
-            </div>
-            <div className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground">Saldo inicial</div>
-            <div className="font-display text-2xl leading-tight">
-              {extratoInfo?.saldo_inicial != null ? brl(extratoInfo.saldo_inicial) : <span className="text-muted-foreground text-lg">não extraído</span>}
-            </div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              {extratoInfo?.saldo_inicial != null ? "Abertura do extrato" : "IA não conseguiu ler do PDF"}
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-2xl border-0 shadow-soft">
-          <CardContent className="p-4">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <ArrowUpFromLine className="h-4 w-4" />
             </div>
-            <div className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground">
-              {extratoInfo?.saldo_final != null && extratoInfo.saldo_inicial != null ? "Saldo final" : "Movimentado no mês"}
-            </div>
+            <div className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground">Movimentado no mês</div>
             <div className="font-display text-2xl leading-tight">
-              {extratoInfo?.saldo_final != null
-                ? brl(extratoInfo.saldo_final)
-                : extratoInfo?.movimentacao_liquida != null && extratoInfo.movimentacao_liquida !== 0
-                  ? <span className={extratoInfo.movimentacao_liquida >= 0 ? "text-emerald-600" : "text-rose-600"}>{extratoInfo.movimentacao_liquida >= 0 ? "+" : ""}{brl(extratoInfo.movimentacao_liquida)}</span>
-                  : <span className="text-muted-foreground text-lg">—</span>}
+              {extratoInfo?.movimentacao_liquida != null && extratoInfo.movimentacao_liquida !== 0
+                ? <span className={extratoInfo.movimentacao_liquida >= 0 ? "text-emerald-600" : "text-rose-600"}>{extratoInfo.movimentacao_liquida >= 0 ? "+" : ""}{brl(extratoInfo.movimentacao_liquida)}</span>
+                : <span className="text-muted-foreground text-lg">—</span>}
             </div>
             <div className="mt-1 text-[11px] text-muted-foreground">
-              {extratoInfo?.saldo_final != null
-                ? "Fechamento do extrato"
-                : extratoInfo != null
-                  ? `↑ ${brl(extratoInfo.movimentacao_credito ?? 0)} · ↓ ${brl(extratoInfo.movimentacao_debito ?? 0)}`
-                  : "Sem extrato"}
+              {extratoInfo != null
+                ? `↑ ${brl(extratoInfo.movimentacao_credito ?? 0)} · ↓ ${brl(extratoInfo.movimentacao_debito ?? 0)}`
+                : "Sem extrato"}
             </div>
           </CardContent>
         </Card>
@@ -540,27 +519,27 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
 
       <div className="mb-3 mt-2 flex items-center justify-between gap-3">
         <h2 className="font-display text-xl">Resultado da conciliação</h2>
-        {resultado && conc && (
-          <Button
-            variant="outline"
-            size="sm"
-            disabled={acting}
-            onClick={async () => {
-              if (!confirm("Limpar o resultado da conciliação? Os lançamentos voltam ao estado “não conciliados” para você rodar de novo.")) return;
-              setActing(true);
-              try {
-                await limparConciliacao({ data: { conciliacao_id: conc.id } });
-                await qc.invalidateQueries({ queryKey: key });
-                await qc.invalidateQueries({ queryKey: lancKey });
-                toast.success("Resultado da conciliação limpo.");
-              } catch (err) {
-                toast.error(err instanceof Error ? err.message : "Erro");
-              } finally { setActing(false); }
-            }}
-          >
-            <Trash2 className="mr-1 h-4 w-4" /> Limpar resultado
-          </Button>
-        )}
+        <Button
+          variant="outline"
+          size="sm"
+          disabled={acting || !resultado || !conc}
+          title={!resultado || !conc ? "Rode a conciliação primeiro" : "Limpar resultado"}
+          onClick={async () => {
+            if (!conc) return;
+            if (!confirm("Limpar o resultado da conciliação? Os lançamentos voltam ao estado “não conciliados” para você rodar de novo.")) return;
+            setActing(true);
+            try {
+              await limparConciliacao({ data: { conciliacao_id: conc.id } });
+              await qc.invalidateQueries({ queryKey: key });
+              await qc.invalidateQueries({ queryKey: lancKey });
+              toast.success("Resultado da conciliação limpo.");
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Erro");
+            } finally { setActing(false); }
+          }}
+        >
+          <Trash2 className="mr-1 h-4 w-4" /> Limpar resultado
+        </Button>
       </div>
 
       {!resultado ? (
