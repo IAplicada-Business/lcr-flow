@@ -80,6 +80,11 @@ Regras:
 - NF-e/Recibo/Planilha/Comprovante: NÃO gere lançamentos (o sistema os usa como
   documento SUPORTE para enriquecer as linhas do extrato). Retorne
   lancamentos_sugeridos = [].
+- Para documentos de SUPORTE (NF-e, recibo, DARF, fatura, comprovante), preencha
+  o objeto dados_suporte com: valor_total (valor total do documento, positivo),
+  data_documento (AAAA-MM-DD), participante (fornecedor/tomador/favorecido) e
+  numero (nº do documento). Esses campos são usados para casar o documento de
+  suporte com a linha correspondente do extrato bancário.
 - valor sempre positivo. data_lancamento em AAAA-MM-DD. competencia em AAAA-MM.
 - Se não tiver certeza da conta, use a conta do grupo correto mais próxima e marque confidence < 0.7.
 - IMPORTANTE — tipo_movimento (perspectiva do BANCO no extrato): preencha SEMPRE
@@ -158,6 +163,17 @@ const SCHEMA = {
     competencia: { type: "string", description: "AAAA-MM" },
     confidence_geral: { type: "number" },
     dados_extraidos: { type: "string", description: "Resumo/JSON dos dados extraídos" },
+    dados_suporte: {
+      type: "object",
+      additionalProperties: false,
+      description: "Só p/ documentos de SUPORTE (NF, recibo, DARF, fatura, comprovante): dados p/ casar com a linha do extrato por valor+data. Deixe vazio p/ extrato bancário.",
+      properties: {
+        valor_total: { type: "number", description: "Valor total do documento (positivo)" },
+        data_documento: { type: "string", description: "Data do documento em AAAA-MM-DD (emissão ou pagamento)" },
+        participante: { type: "string", description: "Fornecedor/tomador/favorecido (nome ou CNPJ)" },
+        numero: { type: "string", description: "Número da NF/recibo/documento" },
+      },
+    },
     lancamentos_sugeridos: {
       type: "array",
       items: {

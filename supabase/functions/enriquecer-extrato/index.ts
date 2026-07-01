@@ -92,14 +92,16 @@ Deno.serve(async (req) => {
   // Pré-processa cada documento suporte extraindo o que importa
   type DocPronto = { id: string; tipo: string; valor: number | null; data: string | null; participante: string | null; numero: string | null };
   const docsProntos: DocPronto[] = docsTyped.map((d) => {
-    const ci = (d.classificacao_ia && typeof d.classificacao_ia === "object" ? (d.classificacao_ia as { dados_extraidos?: unknown }).dados_extraidos : null) as DadosExtraidos | null;
-    const dados = (ci ?? d.dados_extraidos ?? null) as DadosExtraidos | null;
+    const env = (d.classificacao_ia && typeof d.classificacao_ia === "object") ? d.classificacao_ia as Record<string, unknown> : null;
+    const sup = (env && env.dados_suporte && typeof env.dados_suporte === "object") ? env.dados_suporte as DadosExtraidos : null;
+    const ci = (env ? env.dados_extraidos : null) as DadosExtraidos | null;
+    const dados = (sup ?? ci ?? d.dados_extraidos ?? null) as DadosExtraidos | null;
     return {
       id: d.id,
       tipo: d.tipo,
       valor: pickNum(dados, ["valor_total", "valor_servico", "valor", "total"]),
       data: pickDate(dados, ["data_emissao", "data", "data_documento", "data_pagamento", "competencia_servico"]) ?? d.recebido_em?.slice(0, 10) ?? null,
-      participante: pickStr(dados, ["fornecedor", "emitente", "tomador", "cliente", "prestador", "razao_social", "empresa", "destinatario", "favorecido", "recebedor"]),
+      participante: pickStr(dados, ["participante", "fornecedor", "emitente", "tomador", "cliente", "prestador", "razao_social", "empresa", "destinatario", "favorecido", "recebedor"]),
       numero: pickStr(dados, ["numero_nf", "numero", "nf", "documento", "invoice_numero", "nfs_e_numero"]),
     };
   });
