@@ -429,10 +429,10 @@ export function PlanilhaSciTab({ empresaId, empresaNome, competencia }: { empres
                     <CelSci cel={r.debito} />
                     <CelSci cel={r.credito} />
                     <TableCell className={cn("w-24 p-1.5", requerParticipante.has(String(r.debito.codigo)) && !r.part_deb && "bg-amber-50")}>
-                      <CelEditavel id={r.id} initial={r.part_deb} campo="part_deb" placeholder={requerParticipante.has(String(r.debito.codigo)) && !r.part_deb ? "obrigatório" : "part déb"} maxLength={40} mono />
+                      <CelEditavel id={r.id} initial={r.part_deb} campo="part_deb" placeholder={requerParticipante.has(String(r.debito.codigo)) && !r.part_deb ? "obrigatório" : "—"} maxLength={40} mono />
                     </TableCell>
                     <TableCell className={cn("w-24 p-1.5", requerParticipante.has(String(r.credito.codigo)) && !r.part_cred && "bg-amber-50")}>
-                      <CelEditavel id={r.id} initial={r.part_cred} campo="part_cred" placeholder={requerParticipante.has(String(r.credito.codigo)) && !r.part_cred ? "obrigatório" : "part cred"} maxLength={40} mono />
+                      <CelEditavel id={r.id} initial={r.part_cred} campo="part_cred" placeholder={requerParticipante.has(String(r.credito.codigo)) && !r.part_cred ? "obrigatório" : "—"} maxLength={40} mono />
                     </TableCell>
                     <TableCell className="text-right font-mono text-sm">{brl(r.valor)}</TableCell>
                     <TableCell className="text-sm">

@@ -366,6 +366,35 @@ Deno.serve(async (req) => {
   if (!concPath) return fail("Falha ao vincular extrato.");
   await admin.from("lancamentos").delete().eq("documento_id", documento_id);
 
+  // Auto-sync banco/agência/conta pra empresa.contas_bancarias — quando a IA
+  // extraiu, garantimos que o cadastro do cliente reflete o extrato recebido.
+  try {
+    const dadosStr = classificacao.dados_extraidos ?? "";
+    const dadosObj: Record<string, unknown> = typeof dadosStr === "string"
+      ? (() => { try { return JSON.parse(dadosStr); } catch { return {}; } })()
+      : (dadosStr as Record<string, unknown>);
+    const banco = String(dadosObj.banco ?? "").trim();
+    const agencia = String(dadosObj.agencia ?? "").trim();
+    const conta = String(dadosObj.conta ?? dadosObj.conta_corrente ?? "").trim();
+    if (banco && agencia && conta) {
+      const { data: existente } = await admin
+        .from("contas_bancarias")
+        .select("id")
+        .eq("empresa_id", doc.empresa_id)
+        .eq("banco", banco)
+        .eq("agencia", agencia)
+        .eq("conta", conta)
+        .maybeSingle();
+      if (!existente) {
+        await admin.from("contas_bancarias").insert({
+          empresa_id: doc.empresa_id, banco, agencia, conta, tipo: "corrente",
+        });
+      }
+    }
+  } catch {
+    // não-fatal: se der ruim, o extrato já foi processado normal.
+  }
+
   // Fase 3: aplica defaults autoritativos ANTES de resolver ids per-empresa.
   // Para cada lançamento sugerido, se a IA não informou histórico, usamos
   // o historico_padrao da conta no plano oficial LCR. Também marcamos
