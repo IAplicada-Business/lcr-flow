@@ -17,6 +17,7 @@ Pensado para ser disparado pelo n8n (Execute Command), por competência:
 Rode da raiz do repo, com PYTHONUTF8=1 no Windows.
 """
 
+import os
 import sys
 import json
 import time
@@ -96,6 +97,29 @@ def listar_cobrancas_api(competencia: str) -> list:
 
 def log(msg):
     print(msg, flush=True)
+
+
+def outro_orquestrar_rodando() -> bool:
+    """True se JÁ existe OUTRO orquestrar.py rodando (exclui o próprio PID).
+    Fecha a brecha de concorrência quando um run manual coincide com o tick do
+    n8n — o guard 409 do server.js só serializa disparos via HTTP, não protege
+    contra um run manual em paralelo (2 browsers no droplet de 2GB = risco de OOM)."""
+    try:
+        r = subprocess.run(["pgrep", "-af", "orquestrar.py"], capture_output=True, text=True, timeout=10)
+    except Exception:
+        return False  # sem pgrep (ex.: Windows) → não bloqueia
+    meu = os.getpid()
+    for linha in r.stdout.splitlines():
+        linha = linha.strip()
+        if not linha or "drain_backlog" in linha:
+            continue
+        try:
+            pid = int(linha.split(None, 1)[0])
+        except ValueError:
+            continue
+        if pid != meu:
+            return True
+    return False
 
 
 # ── Gestta (somente leitura) via subprocess Node ─────────────────────────────
@@ -328,6 +352,13 @@ def main():
     ap.add_argument("--pausa", type=float, default=0,
                     help="segundos de pausa entre tarefas (espalha a carga; ex.: 90 p/ rodar devagar à noite)")
     args = ap.parse_args()
+
+    # Self-guard: não roda 2 orquestradores ao mesmo tempo (n8n + run manual).
+    if outro_orquestrar_rodando():
+        msg = "outro orquestrar.py já em execução — pulando p/ não concorrer"
+        log(f"  ⚠️ {msg}")
+        print(json.dumps({"ok": True, "skipped": msg}, ensure_ascii=False))
+        return
 
     comp_g = bf.comp_to_gestta(args.competencia)
     log(f"=== Orquestração PROC-001 · competência {args.competencia} ({comp_g}) ===")

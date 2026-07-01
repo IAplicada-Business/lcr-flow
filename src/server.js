@@ -51,6 +51,9 @@ app.get('/runs/latest', auth, (_req, res) => res.json({ ok: true, ...estado }));
 
 app.post('/orquestrar', auth, (req, res) => {
   const { competencia, limite, cliente } = req.body || {};
+  // Log de cada disparo (visibilidade: quem/quando/qual competência) → journalctl.
+  const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '?').toString();
+  console.log(`[orquestrar] POST competencia=${competencia} limite=${limite ?? '-'} cliente=${cliente ?? '-'} ip=${ip} running=${estado.running} at ${new Date().toISOString()}`);
   if (!competencia || !/^\d{4}-\d{2}$/.test(competencia)) {
     return res.status(400).json({ ok: false, error: 'competencia (YYYY-MM) obrigatória' });
   }
