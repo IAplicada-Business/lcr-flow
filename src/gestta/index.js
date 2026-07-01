@@ -317,6 +317,7 @@ async function baixarDocumentosCliente(tarefaId, competencia, destino) {
     }
 
     for (let i = 0; i < numToggles; i++) {
+      try {
       await humanDelay(500, 900);
 
       // Lê o panelId e nomeDoc via evaluate (evita stale element refs)
@@ -383,7 +384,7 @@ async function baixarDocumentosCliente(tarefaId, competencia, destino) {
             if (spans[fileIdx]) {
               spans[fileIdx].dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
             }
-          }, { panelId: itemInfo.panelId, fileIdx: j }),
+          }, { panelId: itemInfo.panelId, fileIdx: j }).catch(() => null),
         ]);
 
         if (!popupOuDownload) {
@@ -447,6 +448,11 @@ async function baixarDocumentosCliente(tarefaId, competencia, destino) {
 
       // Recolhe o toggle para fechar e ir para o próximo
       await humanDelay(500, 800);
+      } catch (eItem) {
+        console.warn(`  Item ${i} falhou (${(eItem.message||'').slice(0,120)}); pulando`);
+        await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => {});
+        await humanDelay(400, 800);
+      }
     }
 
     if (arquivos.length === 0) {
