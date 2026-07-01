@@ -13,6 +13,14 @@ export const ACESSOS: AcessoNode[] = [
   { key: "cx", label: "CX · Experiência" },
   { key: "historico", label: "Histórico do Cérebro" },
   {
+    key: "gestao",
+    label: "Gestão",
+    filhos: [
+      { key: "gestao:logs", label: "Logs de uso" },
+      { key: "gestao:oportunidades", label: "Oportunidades" },
+    ],
+  },
+  {
     key: "configuracoes",
     label: "Configurações",
     filhos: [

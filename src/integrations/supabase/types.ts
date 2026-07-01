@@ -1039,6 +1039,7 @@ export type Database = {
           empresa_id: string
           enriquecido: boolean
           fonte_extrato: boolean
+          hist_sci_codigo: number | null
           historico_id: string | null
           id: string
           importado_em: string | null
@@ -1047,7 +1048,9 @@ export type Database = {
           part_cred: string | null
           part_deb: string | null
           participante: string | null
+          pdc_codigo: number | null
           planilha_url: string | null
+          requer_participante: boolean
           status: Database["public"]["Enums"]["lancamento_status"]
           total_lancamentos: number
           updated_at: string
@@ -1068,6 +1071,7 @@ export type Database = {
           empresa_id: string
           enriquecido?: boolean
           fonte_extrato?: boolean
+          hist_sci_codigo?: number | null
           historico_id?: string | null
           id?: string
           importado_em?: string | null
@@ -1076,7 +1080,9 @@ export type Database = {
           part_cred?: string | null
           part_deb?: string | null
           participante?: string | null
+          pdc_codigo?: number | null
           planilha_url?: string | null
+          requer_participante?: boolean
           status?: Database["public"]["Enums"]["lancamento_status"]
           total_lancamentos?: number
           updated_at?: string
@@ -1097,6 +1103,7 @@ export type Database = {
           empresa_id?: string
           enriquecido?: boolean
           fonte_extrato?: boolean
+          hist_sci_codigo?: number | null
           historico_id?: string | null
           id?: string
           importado_em?: string | null
@@ -1105,7 +1112,9 @@ export type Database = {
           part_cred?: string | null
           part_deb?: string | null
           participante?: string | null
+          pdc_codigo?: number | null
           planilha_url?: string | null
+          requer_participante?: boolean
           status?: Database["public"]["Enums"]["lancamento_status"]
           total_lancamentos?: number
           updated_at?: string
@@ -1148,10 +1157,226 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "lancamentos_hist_sci_codigo_fkey"
+            columns: ["hist_sci_codigo"]
+            isOneToOne: false
+            referencedRelation: "historicos_sci_lcr"
+            referencedColumns: ["codigo"]
+          },
+          {
             foreignKeyName: "lancamentos_historico_id_fkey"
             columns: ["historico_id"]
             isOneToOne: false
             referencedRelation: "historicos_contabeis"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "lancamentos_pdc_codigo_fkey"
+            columns: ["pdc_codigo"]
+            isOneToOne: false
+            referencedRelation: "plano_de_contas_lcr"
+            referencedColumns: ["codigo"]
+          },
+        ]
+      }
+      logs_uso: {
+        Row: {
+          acao: string
+          cliente_id: string | null
+          criado_em: string
+          detalhes: Json
+          id: string
+          tela: string | null
+          user_id: string | null
+        }
+        Insert: {
+          acao: string
+          cliente_id?: string | null
+          criado_em?: string
+          detalhes?: Json
+          id?: string
+          tela?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          acao?: string
+          cliente_id?: string | null
+          criado_em?: string
+          detalhes?: Json
+          id?: string
+          tela?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "logs_uso_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      oportunidade_comentarios: {
+        Row: {
+          autor_id: string | null
+          conteudo: string
+          criado_em: string
+          id: string
+          oportunidade_id: string
+          tipo: string
+        }
+        Insert: {
+          autor_id?: string | null
+          conteudo: string
+          criado_em?: string
+          id?: string
+          oportunidade_id: string
+          tipo?: string
+        }
+        Update: {
+          autor_id?: string | null
+          conteudo?: string
+          criado_em?: string
+          id?: string
+          oportunidade_id?: string
+          tipo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "oportunidade_comentarios_oportunidade_id_fkey"
+            columns: ["oportunidade_id"]
+            isOneToOne: false
+            referencedRelation: "oportunidades"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      oportunidade_historico: {
+        Row: {
+          comentario: string | null
+          id: string
+          mudado_em: string
+          mudado_por: string | null
+          oportunidade_id: string
+          status_anterior: string | null
+          status_novo: string
+        }
+        Insert: {
+          comentario?: string | null
+          id?: string
+          mudado_em?: string
+          mudado_por?: string | null
+          oportunidade_id: string
+          status_anterior?: string | null
+          status_novo: string
+        }
+        Update: {
+          comentario?: string | null
+          id?: string
+          mudado_em?: string
+          mudado_por?: string | null
+          oportunidade_id?: string
+          status_anterior?: string | null
+          status_novo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "oportunidade_historico_oportunidade_id_fkey"
+            columns: ["oportunidade_id"]
+            isOneToOne: false
+            referencedRelation: "oportunidades"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      oportunidade_votos: {
+        Row: {
+          oportunidade_id: string
+          user_id: string
+          votado_em: string
+        }
+        Insert: {
+          oportunidade_id: string
+          user_id: string
+          votado_em?: string
+        }
+        Update: {
+          oportunidade_id?: string
+          user_id?: string
+          votado_em?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "oportunidade_votos_oportunidade_id_fkey"
+            columns: ["oportunidade_id"]
+            isOneToOne: false
+            referencedRelation: "oportunidades"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      oportunidades: {
+        Row: {
+          atualizado_em: string
+          autor_id: string | null
+          cerebro_conversa_id: string | null
+          cliente_id: string | null
+          criado_em: string
+          descricao: string
+          frequencia_uso: string | null
+          id: string
+          impacto: string | null
+          numero: string
+          prioridade: string | null
+          problema_resolve: string | null
+          status: string | null
+          tela_origem: string | null
+          tipo: string
+          titulo: string
+        }
+        Insert: {
+          atualizado_em?: string
+          autor_id?: string | null
+          cerebro_conversa_id?: string | null
+          cliente_id?: string | null
+          criado_em?: string
+          descricao: string
+          frequencia_uso?: string | null
+          id?: string
+          impacto?: string | null
+          numero: string
+          prioridade?: string | null
+          problema_resolve?: string | null
+          status?: string | null
+          tela_origem?: string | null
+          tipo: string
+          titulo: string
+        }
+        Update: {
+          atualizado_em?: string
+          autor_id?: string | null
+          cerebro_conversa_id?: string | null
+          cliente_id?: string | null
+          criado_em?: string
+          descricao?: string
+          frequencia_uso?: string | null
+          id?: string
+          impacto?: string | null
+          numero?: string
+          prioridade?: string | null
+          problema_resolve?: string | null
+          status?: string | null
+          tela_origem?: string | null
+          tipo?: string
+          titulo?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "oportunidades_cliente_id_fkey"
+            columns: ["cliente_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
             referencedColumns: ["id"]
           },
         ]

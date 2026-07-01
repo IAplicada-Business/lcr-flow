@@ -3,10 +3,10 @@ import { useRouterState } from "@tanstack/react-router";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Brain, LineChart, HeartHandshake, Send, X } from "lucide-react";
+import { Brain, LineChart, HeartHandshake, Send, X, Compass, MessageSquareWarning } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { trackAction } from "@/lib/logs.functions";
 
-// Ícone do Cérebro: balão de conversa com play (no lugar do brilho).
 function CerebroIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="none" className={className} aria-hidden="true">
@@ -16,20 +16,25 @@ function CerebroIcon({ className }: { className?: string }) {
   );
 }
 
-type Persona = "mestre" | "consultor" | "cuidador";
+type Persona = "mestre" | "consultor" | "cuidador" | "buddy" | "reportar";
 type Msg = { autor: "user" | "ia"; texto: string };
+type Turno = { role: "user" | "assistant"; content: string };
 
 const PERSONAS: Record<Persona, { label: string; fn: string; icon: typeof Brain; cor: string; saudacao: string }> = {
-  mestre: { label: "Mestre", fn: "cerebro-mestre", icon: Brain, cor: "text-violet-600", saudacao: "Sou o Mestre. Pergunte sobre processos, padrões e procedimentos da LCR." },
-  consultor: { label: "Consultor", fn: "cerebro-consultor", icon: LineChart, cor: "text-blue-600", saudacao: "Sou o Consultor. Posso analisar a saúde financeira e gerar insights do cliente." },
-  cuidador: { label: "Cuidador", fn: "cerebro-cuidador", icon: HeartHandshake, cor: "text-rose-600", saudacao: "Sou o Cuidador. Cuido do relacionamento e do health score da carteira." },
+  mestre:    { label: "Mestre",    fn: "cerebro-mestre",    icon: Brain,                 cor: "text-violet-600", saudacao: "Sou o Mestre. Pergunte sobre processos, padrões e procedimentos da LCR." },
+  consultor: { label: "Consultor", fn: "cerebro-consultor", icon: LineChart,             cor: "text-blue-600",   saudacao: "Sou o Consultor. Posso analisar a saúde financeira e gerar insights do cliente." },
+  cuidador:  { label: "Cuidador",  fn: "cerebro-cuidador",  icon: HeartHandshake,        cor: "text-rose-600",   saudacao: "Sou o Cuidador. Cuido do relacionamento e do health score da carteira." },
+  buddy:     { label: "Buddy",     fn: "cerebro-buddy",     icon: Compass,               cor: "text-emerald-600",saudacao: "Sou o Buddy. Me pergunte COMO fazer algo na tela — botões, campos, fluxo. Se for dúvida contábil, chame o Mestre." },
+  reportar:  { label: "Reportar",  fn: "cerebro-reportar",  icon: MessageSquareWarning,  cor: "text-amber-600",  saudacao: "Sou o Reportar. Me conta um bug, melhoria ou dúvida. Levo pro Bruno hoje." },
 };
 
 const UUID_RE = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i;
 
 function personaDaRota(pathname: string): Persona {
-  if (pathname.startsWith("/consultive")) return "consultor";
-  if (pathname.startsWith("/cx")) return "cuidador";
+  if (pathname.startsWith("/consultive"))                                          return "consultor";
+  if (pathname.startsWith("/cx"))                                                  return "cuidador";
+  if (pathname.startsWith("/gestao/oport"))                                        return "reportar";
+  if (/^\/(conciliacao|documentos|lancamentos|tarefas|clientes\/)/.test(pathname)) return "buddy";
   return "mestre";
 }
 
@@ -40,19 +45,27 @@ export function CerebroAssistant() {
   const [personaTravada, setPersonaTravada] = useState(false);
   const [pergunta, setPergunta] = useState("");
   const [msgs, setMsgs] = useState<Msg[]>([]);
+  const [ctxTurnos, setCtxTurnos] = useState<Turno[]>([]);  // usado só pela persona Reportar
   const [busy, setBusy] = useState(false);
   const fimRef = useRef<HTMLDivElement>(null);
 
-  // empresa em contexto, quando a rota tem um id de empresa
   const empresaId = useMemo(() => {
-    if (/^\/(consultive|cx|clientes)\//.test(pathname)) return pathname.match(UUID_RE)?.[0] ?? undefined;
+    if (/^\/(consultive|cx|clientes|conciliacao)\//.test(pathname)) return pathname.match(UUID_RE)?.[0] ?? undefined;
     return undefined;
   }, [pathname]);
 
-  // persona segue a tela, salvo override manual
   useEffect(() => {
-    if (!personaTravada) setPersona(personaDaRota(pathname));
+    if (!personaTravada) {
+      const nova = personaDaRota(pathname);
+      setPersona(nova);
+    }
   }, [pathname, personaTravada]);
+
+  useEffect(() => {
+    // trocar persona limpa o contexto conversacional do Reportar
+    setCtxTurnos([]);
+    setMsgs([]);
+  }, [persona]);
 
   useEffect(() => { fimRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs, busy]);
 
@@ -63,12 +76,27 @@ export function CerebroAssistant() {
     setMsgs((m) => [...m, { autor: "user", texto: q }]);
     setBusy(true);
     try {
-      const { data, error } = await supabase.functions.invoke(PERSONAS[persona].fn, {
-        body: { pergunta: q, empresa_id: empresaId },
-      });
+      const bodyBase: Record<string, unknown> = { pergunta: q, empresa_id: empresaId, tela: pathname };
+      if (persona === "reportar") bodyBase.conversation_context = ctxTurnos;
+
+      const { data, error } = await supabase.functions.invoke(PERSONAS[persona].fn, { body: bodyBase });
       if (error) throw error;
-      const resp = (data as { ok?: boolean; resposta?: string; error?: string });
-      setMsgs((m) => [...m, { autor: "ia", texto: resp?.resposta || resp?.error || "Sem resposta." }]);
+      const resp = data as {
+        ok?: boolean;
+        resposta?: string;
+        error?: string;
+        oportunidade?: { id: string; numero: string } | null;
+        conversation_context?: Turno[];
+      };
+      const texto = resp?.resposta || resp?.error || "Sem resposta.";
+      setMsgs((m) => [...m, { autor: "ia", texto }]);
+      if (persona === "reportar" && resp.conversation_context) setCtxTurnos(resp.conversation_context);
+
+      // tracking
+      void trackAction("perguntou_cerebro", { clienteId: empresaId ?? null, tela: pathname, detalhes: { persona } });
+      if (persona === "reportar" && resp.oportunidade) {
+        void trackAction("reportou_oportunidade", { clienteId: empresaId ?? null, tela: pathname, detalhes: { numero: resp.oportunidade.numero, id: resp.oportunidade.id } });
+      }
     } catch (e) {
       setMsgs((m) => [...m, { autor: "ia", texto: `Não consegui responder agora: ${e instanceof Error ? e.message : "erro"}.` }]);
     } finally {
@@ -98,11 +126,13 @@ export function CerebroAssistant() {
             value={persona}
             onValueChange={(v) => { setPersona(v as Persona); setPersonaTravada(true); }}
           >
-            <SelectTrigger className="h-8 w-[130px] text-xs"><SelectValue /></SelectTrigger>
+            <SelectTrigger className="h-8 w-[140px] text-xs"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="mestre">Mestre</SelectItem>
               <SelectItem value="consultor">Consultor</SelectItem>
               <SelectItem value="cuidador">Cuidador</SelectItem>
+              <SelectItem value="buddy">Buddy</SelectItem>
+              <SelectItem value="reportar">Reportar</SelectItem>
             </SelectContent>
           </Select>
           <button onClick={() => setOpen(false)} className="rounded-lg p-1.5 text-muted-foreground hover:bg-accent" aria-label="Fechar"><X className="h-4 w-4" /></button>
@@ -138,7 +168,7 @@ export function CerebroAssistant() {
             onChange={(e) => setPergunta(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); enviar(); } }}
             rows={2}
-            placeholder={`Pergunte ao ${PERSONAS[persona].label}…`}
+            placeholder={persona === "reportar" ? "Descreva rapidamente: bug, melhoria ou dúvida" : `Pergunte ao ${PERSONAS[persona].label}…`}
             className="flex-1 resize-none rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
           />
           <Button size="icon" disabled={busy || !pergunta.trim()} onClick={enviar} aria-label="Enviar"><Send className="h-4 w-4" /></Button>

@@ -2,7 +2,7 @@ import { Link, useRouter, useRouterState } from "@tanstack/react-router";
 import {
   LayoutDashboard, Building2, ListChecks, Settings, LogOut, PanelLeftClose, PanelLeftOpen,
   Brain, LineChart, HeartHandshake, Plug, Users, ListTree, ChevronDown, Bell, UserPen, Camera,
-  History, Check, ChevronRight, Search, Activity, Info, type LucideIcon,
+  History, Check, ChevronRight, Search, Activity, Info, SlidersHorizontal, Lightbulb, type LucideIcon,
 } from "lucide-react";
 import { LcrLogo } from "./brand";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -114,6 +114,10 @@ const NAV: NavItem[] = [
     { to: "/historico", label: "Histórico Geral", icon: History, acesso: "historico" },
     { to: "/knowledge", label: "Base de Conhecimento", icon: ListTree, acesso: "knowledge" },
   ] },
+  { group: "Gestão", icon: SlidersHorizontal, itens: [
+    { to: "/gestao/logs",          label: "Logs de uso",   icon: Activity,  acesso: "gestao:logs" },
+    { to: "/gestao/oportunidades", label: "Oportunidades", icon: Lightbulb, acesso: "gestao:oportunidades" },
+  ] },
   { group: "Configurações", icon: Settings, itens: [
     { to: "/configuracoes", tab: "integracoes", label: "Integrações", icon: Plug, acesso: "configuracoes:integracoes" },
     { to: "/configuracoes", tab: "usuarios", label: "Usuários", icon: Users, acesso: "configuracoes:usuarios" },
@@ -172,6 +176,8 @@ const ROUTE_TITLES: Record<string, string> = {
   "/documentos": "Documentos",
   "/lancamentos": "Lançamentos",
   "/conciliacao": "Conciliação",
+  "/gestao/logs": "Logs de uso",
+  "/gestao/oportunidades": "Oportunidades",
 };
 
 function tituloDaRota(pathname: string): string {
