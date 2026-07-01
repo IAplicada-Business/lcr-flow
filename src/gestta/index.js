@@ -663,6 +663,8 @@ async function analisarSuficienciaDocumentos(tarefaId, competencia = null) {
     if (!(await sessaoValida(page))) throw new Error('SESSAO_EXPIRADA');
 
     await page.goto(urlDetalhe(tarefaId, ano, mes), { waitUntil: 'networkidle', timeout: 45000 });
+    // Espera Angular hidratar antes de tocar em qualquer coisa
+    await page.waitForSelector('button[ng-click="taskDetails.actions.openCustomerDetailsModal()"]', { timeout: 20000 }).catch(() => {});
     await humanDelay(2500, 4000);
 
     // ── 1. Lê Observação via modal Dados Cadastrais ───────────────────────
