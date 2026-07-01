@@ -27,6 +27,14 @@ const COBRANCA_TEMPLATE = '614b4c905962410006a60e08';
 
 fs.mkdirSync(SCREENSHOTS_PATH, { recursive: true });
 
+// Rede de segurança: rejeições não tratadas (ex.: `cdpSession.send: Target ...
+// has been closed` no teardown do browser) NÃO devem derrubar o processo Node
+// inteiro — apenas logar. O erro real de cada operação já propaga pela cadeia
+// await da função correspondente (que faz screenshot + throw).
+process.on('unhandledRejection', (err) => {
+  console.error('unhandledRejection (ignorado):', (err && err.message) || err);
+});
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 async function humanDelay(min = 600, max = 1400) {
@@ -703,7 +711,16 @@ async function analisarSuficienciaDocumentos(tarefaId, competencia = null) {
     }
 
     // ── 2. Expande DOCUMENTOS SOLICITADOS (se fechado) ────────────────────
-    await page.waitForSelector('text=DOCUMENTOS SOLICITADOS', { timeout: 60000 });
+    // Não-fatal: se a seção não renderizar (v2 lenta / navegação parcial), NÃO
+    // derruba a tarefa como "erro" — devolve suficiência indefinida p/ o
+    // orquestrador tratar como aguardando_docs (retentável no próximo tick),
+    // evitando também um falso "suficiente" (documentos vazio → 0 pendentes).
+    const temSecao = await page.waitForSelector('text=DOCUMENTOS SOLICITADOS', { timeout: 60000 })
+      .then(() => true).catch(() => false);
+    if (!temSecao) {
+      console.warn('Seção DOCUMENTOS SOLICITADOS não renderizou — suficiência indefinida');
+      return { observacao, documentos: [], suficiente: false, pendentes: [], secao_ausente: true };
+    }
     const secaoAberta = await page.evaluate(() =>
       document.querySelectorAll('.document-request-list a.accordion-toggle').length > 0
     );
