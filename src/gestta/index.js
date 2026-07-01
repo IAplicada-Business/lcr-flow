@@ -133,7 +133,7 @@ async function buscarTarefasPendentes(competencia = null) {
   const ano   = competencia ? parseInt(competencia.split('/')[1]) : agora.getFullYear();
   const mes   = competencia ? parseInt(competencia.split('/')[0]) : agora.getMonth() + 1;
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
   const context = await criarContexto(browser);
   const page    = await context.newPage();
 
@@ -241,7 +241,7 @@ async function baixarDocumentosCliente(tarefaId, competencia, destino) {
 
   fs.mkdirSync(destino, { recursive: true });
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
   const context = await criarContexto(browser);
   const page    = await context.newPage();
   const arquivos = [];
@@ -544,7 +544,7 @@ async function concluirTarefaLancamentos(tarefaId, competencia = null) {
   const ano   = competencia ? parseInt(competencia.split('/')[1]) : agora.getFullYear();
   const mes   = competencia ? parseInt(competencia.split('/')[0]) : agora.getMonth() + 1;
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
   const context = await criarContexto(browser);
   const page    = await context.newPage();
 
@@ -576,7 +576,7 @@ async function buscarTarefasCobranca(competencia = null) {
   const ano   = competencia ? parseInt(competencia.split('/')[1]) : agora.getFullYear();
   const mes   = competencia ? parseInt(competencia.split('/')[0]) : agora.getMonth() + 1;
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
   const context = await criarContexto(browser);
   const page    = await context.newPage();
 
@@ -655,7 +655,7 @@ async function analisarSuficienciaDocumentos(tarefaId, competencia = null) {
   const ano   = competencia ? parseInt(competencia.split('/')[1]) : agora.getFullYear();
   const mes   = competencia ? parseInt(competencia.split('/')[0]) : agora.getMonth() + 1;
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
   const context = await criarContexto(browser);
   const page    = await context.newPage();
 
@@ -766,7 +766,7 @@ async function marcarChecklistEConcluir(tarefaId, competencia = null) {
   const ano   = competencia ? parseInt(competencia.split('/')[1]) : agora.getFullYear();
   const mes   = competencia ? parseInt(competencia.split('/')[0]) : agora.getMonth() + 1;
 
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
   const context = await criarContexto(browser);
   const page    = await context.newPage();
 
