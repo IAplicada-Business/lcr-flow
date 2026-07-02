@@ -36,6 +36,7 @@ sys.path.insert(0, str(ROOT / "src" / "sci"))
 import bridge_front as bf                                  # noqa: E402  (obter_jwt, sb_get, processar_via_gestta, _node_eval, comp_to_gestta, vincular_consultor)
 from motor_classificacao import avaliar_suficiencia_documentos  # noqa: E402
 from gerar_planilha_supabase import BANCO_PARA_CODIGO       # noqa: E402
+from gestta import api_docs                                 # noqa: E402  (detalhe_tarefa/suficiencia/baixar_documentos — caminho --via-api, sem browser)
 
 OUT_DIR = ROOT / "outputs" / "orquestracao"
 LEDGER = OUT_DIR / "processadas.json"  # idempotência local (cobre 'processada' sem doc no front)
@@ -55,17 +56,20 @@ def _gestta_jwt() -> str:
     raise RuntimeError("token ngStorage-jwt não encontrado na sessão Gestta")
 
 
-def listar_cobrancas_api(competencia: str) -> list:
+def listar_cobrancas_api(competencia: str, statuses=None) -> list:
     """Lista tarefas COBRANÇA DE MOVIMENTO MENSAL via API direta (sem navegador).
-    Filtra por Data Meta (DUE_DATE) no mês da competência. Paginação automática."""
+    Filtra por Data Meta (DUE_DATE) no mês da competência. Paginação automática.
+    statuses: lista de status Gestta (default ["OPEN"] — preserva o tick n8n vivo;
+    backfill passa ["OPEN","DONE"])."""
     jwt = _gestta_jwt()
+    statuses = statuses or ["OPEN"]
     ano, mes = int(competencia[:4]), int(competencia[5:7])
     ny, nm = (ano + 1, 1) if mes == 12 else (ano, mes + 1)
     start = f"{ano:04d}-{mes:02d}-01T03:00:00.000Z"
     end = f"{ny:04d}-{nm:02d}-01T02:59:59.999Z"
     base = {
         "type": ["SERVICE_ORDER", "RECURRENT", "ACCOUNTING"],
-        "company_task": [COBRANCA_TEMPLATE], "status": ["OPEN"],
+        "company_task": [COBRANCA_TEMPLATE],
         "start_date": start, "end_date": end, "date_type": "DUE_DATE",
         "overdue": False, "downloaded": False, "not_downloaded": False, "fine": False,
         "on_time": False, "collaborator": False, "no_owner": False, "email_not_sent": False,
@@ -73,25 +77,35 @@ def listar_cobrancas_api(competencia: str) -> list:
         "os_workflow": True, "limit": 100,
     }
     headers = {"Authorization": jwt, "Content-Type": "application/json"}
-    out, page = [], 1
-    while True:
-        r = requests.post(GESTTA_SEARCH, headers=headers, json={**base, "page": page}, timeout=60)
-        if not r.ok:
-            raise RuntimeError(f"Gestta search HTTP {r.status_code}: {r.text[:200]}")
-        docs = r.json().get("docs", [])
-        for d in docs:
-            cust = d.get("customer") or {}
-            out.append({
-                "taskId": d.get("_id"),
-                "nome": d.get("name"),
-                "clienteCodigo": cust.get("code") or "",
-                "clienteNome": cust.get("name") or "",
-                "responsavel": (d.get("owner") or {}).get("name") or "",
-                "competence": (d.get("competence_date") or "")[:7],  # mês do movimento (lag)
-            })
-        if len(docs) < base["limit"]:
-            break
-        page += 1
+    # A API do Gestta NÃO faz união quando 'status' traz vários valores (retorna só
+    # OPEN, ignorando DONE — verificado 2026-07-02). Consultamos UM status por vez
+    # e mesclamos com dedup por taskId.
+    vistos, out = set(), []
+    for status in statuses:
+        page = 1
+        while True:
+            body = {**base, "status": [status], "page": page}
+            r = requests.post(GESTTA_SEARCH, headers=headers, json=body, timeout=60)
+            if not r.ok:
+                raise RuntimeError(f"Gestta search HTTP {r.status_code}: {r.text[:200]}")
+            docs = r.json().get("docs", [])
+            for d in docs:
+                tid = d.get("_id")
+                if tid in vistos:
+                    continue
+                vistos.add(tid)
+                cust = d.get("customer") or {}
+                out.append({
+                    "taskId": tid,
+                    "nome": d.get("name"),
+                    "clienteCodigo": cust.get("code") or "",
+                    "clienteNome": cust.get("name") or "",
+                    "responsavel": (d.get("owner") or {}).get("name") or "",
+                    "competence": (d.get("competence_date") or "")[:7],  # mês do movimento (lag)
+                })
+            if len(docs) < base["limit"]:
+                break
+            page += 1
     return out
 
 
@@ -165,20 +179,26 @@ def garantir_sessao_gestta() -> bool:
     return relogin_gestta()
 
 
-def processar_com_retry(t: dict, competencia: str, comp_g: str, jwt: str) -> dict:
+def processar_com_retry(t: dict, competencia: str, comp_g: str, jwt: str,
+                        via_api: bool = False, jwt_gestta: str = None,
+                        ignorar_suficiencia: bool = False) -> dict:
     """Processa a tarefa com até 1 retry. Se o erro for SESSAO_EXPIRADA, reloga
     (headless) antes de retentar; erros transientes de navegação também ganham
     1 nova tentativa. A idempotência (ledger + doc origem=gestta) evita duplicar
-    trabalho já concluído."""
-    def _uma_vez() -> dict:
+    trabalho já concluído.
+    via_api: usa processar_tarefa_api (REST, sem browser); no relogin, relê o
+    JWT do Gestta (jwt_gestta) antes de retentar."""
+    def _uma_vez(jwt_g) -> dict:
         try:
+            if via_api:
+                return processar_tarefa_api(t, competencia, comp_g, jwt, jwt_g, ignorar_suficiencia)
             return processar_tarefa(t, competencia, comp_g, jwt)
         except Exception as e:
             return {"cliente": t.get("clienteNome") or t.get("clienteCodigo"),
                     "tarefa_id": t.get("taskId"), "status": "erro",
                     "motivo": f"exceção não tratada: {str(e)[:600]}"}
 
-    r = _uma_vez()
+    r = _uma_vez(jwt_gestta)
     if r.get("status") != "erro":
         return r
 
@@ -186,9 +206,14 @@ def processar_com_retry(t: dict, competencia: str, comp_g: str, jwt: str) -> dic
         if not relogin_gestta():
             r["tentativas"] = 1  # relogin falhou — não adianta retentar
             return r
+        if via_api:
+            try:
+                jwt_gestta = _gestta_jwt()  # relê o token novo p/ o retry (modo API)
+            except Exception:
+                pass
 
     log("    ↻ retry da tarefa (1x)...")
-    r2 = _uma_vez()
+    r2 = _uma_vez(jwt_gestta)
     r2["tentativas"] = 2
     return r2
 
@@ -354,6 +379,85 @@ def processar_tarefa(t: dict, competencia: str, comp_g: str, jwt: str) -> dict:
             "lancamentos_extrato": lanc, "outros_docs": len(resumo.get("outros", []))}
 
 
+# ── Processa uma tarefa via API REST (sem browser) — Etapas 1–4 ───────────────
+def processar_tarefa_api(t: dict, competencia: str, comp_g: str, jwt: str, jwt_gestta: str,
+                         ignorar_suficiencia: bool = False) -> dict:
+    """Igual a processar_tarefa, mas troca os 2 passos de browser por REST:
+    suficiência via api_docs.detalhe_tarefa/suficiencia e download via
+    api_docs.baixar_documentos, chamando o MESMO núcleo bf.processar_arquivos.
+    jwt = JWT do Supabase (front/edge); jwt_gestta = JWT do Gestta (api.gestta)."""
+    codigo = t.get("clienteCodigo") or ""
+    nome = t.get("clienteNome") or ""
+    resp = t.get("responsavel") or ""
+    tarefa_id = t.get("taskId")
+    base = {"cliente": nome or codigo, "tarefa_id": tarefa_id}
+
+    if not tarefa_id:
+        return {**base, "status": "erro", "motivo": "tarefa sem taskId"}
+
+    empresa = t["_empresa"] if "_empresa" in t else resolver_empresa(codigo, nome)
+    if not empresa:
+        return {**base, "status": "erro", "motivo": f"empresa não encontrada no Supabase ('{nome or codigo}')"}
+    empresa_id = empresa["id"]
+    comp_mov = t.get("competence") or competencia   # mês do movimento (lançamentos vão p/ cá)
+    base["empresa_id"] = empresa_id
+    base["competencia_movimento"] = comp_mov
+
+    if ja_processada(empresa_id, comp_mov):
+        return {**base, "status": "pulada_idempotencia"}
+
+    # Etapa 2 — suficiência via API REST (1 GET traz docs + customer p/ o download)
+    try:
+        detalhe = api_docs.detalhe_tarefa(tarefa_id, jwt_gestta)
+        suf = api_docs.suficiencia(detalhe)
+    except Exception as e:
+        return {**base, "status": "erro", "motivo": f"suficiência(api): {str(e)[:600]}"}
+    # Backfill de mês fechado (--ignorar-suficiencia): não faz sentido aguardar doc
+    # que não virá — processa o que existe. Pula o gate de suficiência (e a chamada
+    # de IA). Sem a flag, mantém o gate do fluxo vivo (aguardando_docs).
+    if not ignorar_suficiencia:
+        try:
+            ia = avaliar_suficiencia_documentos(suf.get("observacao", ""), suf.get("documentos", []), comp_g)
+        except Exception:
+            ia = {"suficiente": suf.get("suficiente", False), "faltando": suf.get("pendentes", [])}
+        suficiente = bool(suf.get("suficiente")) and bool(ia.get("suficiente", True))
+        if not suficiente:
+            return {**base, "status": "aguardando_docs",
+                    "faltando": ia.get("faltando") or suf.get("pendentes") or []}
+
+    docs_sf = suf.get("documentos") or []
+    tem_baixavel = any((d.get("status") == "enviado") or (d.get("numArquivos") or 0) > 0 for d in docs_sf)
+    if docs_sf and not tem_baixavel:
+        return {**base, "status": "sem_documentos",
+                "motivo": "todos os documentos solicitados estão desconsiderados (nada a baixar)"}
+
+    # Etapa 4 — download via API + núcleo reusado (bf.processar_arquivos, sem browser)
+    banco = resolver_banco(empresa_id) or BANCO_PADRAO
+    destino = str(ROOT / "outputs" / "gestta" / f"{empresa_id}_{comp_mov}")
+    try:
+        arquivos = api_docs.baixar_documentos(detalhe, destino, jwt_gestta)
+    except Exception as e:
+        return {**base, "status": "erro", "motivo": f"download(api): {str(e)[:600]}"}
+    if not arquivos:
+        return {**base, "status": "sem_documentos", "motivo": "API: 0 arquivos baixáveis"}
+
+    try:
+        resumo = bf.processar_arquivos(empresa_id, comp_mov, arquivos, banco, jwt)
+    except Exception as e:
+        return {**base, "status": "erro", "motivo": f"etapa4(api): {str(e)[:600]}"}
+
+    if resp:
+        try:
+            bf.vincular_consultor(empresa_id, resp)
+        except Exception:
+            pass
+
+    extratos = resumo.get("extratos", [])
+    lanc = sum(e.get("lancamentos", 0) for e in extratos)
+    return {**base, "status": "processada", "banco": banco, "consultor": resp,
+            "lancamentos_extrato": lanc, "outros_docs": len(resumo.get("outros", []))}
+
+
 def main():
     ap = argparse.ArgumentParser(description="Orquestra PROC-001 Etapas 1–4 em todas as tarefas COBRANÇA")
     ap.add_argument("--competencia", required=True, help="YYYY-MM")
@@ -361,6 +465,13 @@ def main():
     ap.add_argument("--cliente", default=None, help="processa só um cliente (código/nome contém)")
     ap.add_argument("--pausa", type=float, default=0,
                     help="segundos de pausa entre tarefas (espalha a carga; ex.: 90 p/ rodar devagar à noite)")
+    ap.add_argument("--via-api", action="store_true",
+                    help="baixa docs/suficiência pela API REST do Gestta (sem Playwright) — backfill")
+    ap.add_argument("--status", default="OPEN",
+                    help="status Gestta separados por vírgula (default OPEN; backfill: OPEN,DONE)")
+    ap.add_argument("--ignorar-suficiencia", action="store_true",
+                    help="backfill de mês fechado: processa qualquer tarefa com arquivo baixável, "
+                         "sem exigir suficiência (pula o gate aguardando_docs). Só com --via-api.")
     args = ap.parse_args()
 
     # Self-guard: não roda 2 orquestradores ao mesmo tempo (n8n + run manual).
@@ -371,18 +482,35 @@ def main():
         return
 
     comp_g = bf.comp_to_gestta(args.competencia)
-    log(f"=== Orquestração PROC-001 · competência {args.competencia} ({comp_g}) ===")
+    statuses = [s.strip().upper() for s in (args.status or "").split(",") if s.strip()] or ["OPEN"]
+    modo = "API REST (sem navegador)" if args.via_api else "browser"
+    log(f"=== Orquestração PROC-001 · competência {args.competencia} ({comp_g}) · modo {modo} · status {statuses} ===")
     log("  (somente leitura no Gestta — não conclui tarefas)")
 
     jwt = bf.obter_jwt()
     log("  JWT do usuário de serviço obtido ✓")
 
-    # Healthcheck proativo da sessão do Gestta (reloga headless se expirada) —
-    # a listagem e o processamento dependem dela; sem isso o lote inteiro queima.
-    garantir_sessao_gestta()
+    # Modo browser: healthcheck proativo da sessão (reloga headless se expirada).
+    # Modo API: pula o browser; usa o JWT do arquivo de sessão e reloga só se a
+    # listagem retornar 401/403 (raio ≤1 run; o drain relê o token a cada lote).
+    jwt_gestta = None
+    if args.via_api:
+        jwt_gestta = _gestta_jwt()
+    else:
+        garantir_sessao_gestta()
 
-    log(f"\n[E1] Listando tarefas COBRANÇA via API ({args.competencia})...")
-    tarefas = listar_cobrancas_api(args.competencia)
+    log(f"\n[E1] Listando tarefas COBRANÇA via API ({args.competencia}, status={statuses})...")
+    try:
+        tarefas = listar_cobrancas_api(args.competencia, statuses)
+    except RuntimeError as e:
+        if args.via_api and ("401" in str(e) or "403" in str(e)):
+            log("  sessão Gestta expirada na listagem — relogando (headless) e repetindo...")
+            if not relogin_gestta():
+                raise
+            jwt_gestta = _gestta_jwt()
+            tarefas = listar_cobrancas_api(args.competencia, statuses)
+        else:
+            raise
     log(f"    {len(tarefas)} tarefa(s) COBRANÇA encontradas (resolver direto, sem navegador)")
 
     if args.cliente:
@@ -399,7 +527,8 @@ def main():
         log(f"\n── [{i}/{len(tarefas)}] {t.get('clienteCodigo')} - {t.get('clienteNome')} ──")
         # Blindagem (Bug A) + retry por tarefa (relogin em SESSAO_EXPIRADA):
         # nunca derruba o run inteiro; tenta 1x novamente antes de desistir.
-        r = processar_com_retry(t, args.competencia, comp_g, jwt)
+        r = processar_com_retry(t, args.competencia, comp_g, jwt, via_api=args.via_api,
+                                jwt_gestta=jwt_gestta, ignorar_suficiencia=args.ignorar_suficiencia)
         log(f"    → {r['status']}" + (f" ({r.get('motivo') or r.get('faltando') or ''})" if r['status'] != 'processada' else f" · {r.get('lancamentos_extrato',0)} lançamentos"))
         if r.get("status") in ("processada", "sem_documentos"):
             marcar_processada(r.get("empresa_id"), r.get("competencia_movimento") or args.competencia)

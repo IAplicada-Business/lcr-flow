@@ -44,9 +44,14 @@ def outro_orquestrar_rodando() -> bool:
         return False
 
 
-def rodar_lote(competencia: str, limite: int) -> dict:
+def rodar_lote(competencia: str, limite: int, status: str = "OPEN",
+               via_api: bool = False, ignorar_suficiencia: bool = False) -> dict:
     """Roda um lote fresco e devolve a contagem (lê a última linha JSON do stdout)."""
-    cmd = [PY, ORQ, "--competencia", competencia, "--limite", str(limite)]
+    cmd = [PY, ORQ, "--competencia", competencia, "--limite", str(limite), "--status", status]
+    if via_api:
+        cmd.append("--via-api")
+    if ignorar_suficiencia:
+        cmd.append("--ignorar-suficiencia")
     env = {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     import os
     p = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT),
@@ -72,10 +77,15 @@ def main():
     ap.add_argument("--limite", type=int, default=8)
     ap.add_argument("--pausa", type=float, default=30, help="segundos entre lotes")
     ap.add_argument("--max-lotes", type=int, default=100)
+    ap.add_argument("--status", default="OPEN", help="status Gestta (ex.: OPEN,DONE p/ backfill)")
+    ap.add_argument("--via-api", action="store_true", help="repassa --via-api ao orquestrador (backfill sem browser)")
+    ap.add_argument("--ignorar-suficiencia", action="store_true",
+                    help="repassa --ignorar-suficiencia (backfill de mês fechado: processa o que existe)")
     args = ap.parse_args()
 
-    log(f"INÍCIO drain · competência {args.competencia} · limite {args.limite}/lote · pausa {args.pausa:g}s")
-    total_proc = total_erro = total_pulada = total_aguard = 0
+    log(f"INÍCIO drain · competência {args.competencia} · limite {args.limite}/lote · pausa {args.pausa:g}s "
+        f"· status {args.status}" + (" · via-api" if args.via_api else ""))
+    total_proc = total_erro = total_pulada = total_aguard = total_semdoc = 0
     sem_progresso = 0
 
     for i in range(1, args.max_lotes + 1):
@@ -91,16 +101,18 @@ def main():
                 break
 
         log(f"── lote {i}/{args.max_lotes} ──")
-        res = rodar_lote(args.competencia, args.limite)
+        res = rodar_lote(args.competencia, args.limite, args.status, args.via_api, args.ignorar_suficiencia)
         c = res.get("contagem", {}) or {}
         proc = c.get("processada", 0)
         erro = c.get("erro", 0)
         pulada = c.get("pulada_idempotencia", 0)
         aguard = c.get("aguardando_docs", 0)
+        sem_doc = c.get("sem_documentos", 0)
+        progresso = proc + sem_doc  # sem_documentos também drena o ledger (terminal benigno, não é erro)
         total = res.get("total_tarefas")
-        total_proc += proc; total_erro += erro; total_pulada += pulada; total_aguard += aguard
-        log(f"   lote: processada={proc} erro={erro} aguardando={aguard} pulada={pulada} (selecionadas={total})"
-            f" | acumulado: proc={total_proc} erro={total_erro} aguard={total_aguard}")
+        total_proc += proc; total_erro += erro; total_pulada += pulada; total_aguard += aguard; total_semdoc += sem_doc
+        log(f"   lote: processada={proc} sem_doc={sem_doc} erro={erro} aguardando={aguard} pulada={pulada} (selecionadas={total})"
+            f" | acumulado: proc={total_proc} sem_doc={total_semdoc} erro={total_erro} aguard={total_aguard}")
 
         if res.get("rc") not in (0, None):
             log(f"   ⚠️ lote retornou rc={res.get('rc')} — registrado, seguindo")
@@ -110,11 +122,14 @@ def main():
             log("✅ FIM: nenhuma tarefa pendente selecionada — backlog esvaziado.")
             break
 
-        # parada 2: lotes seguidos sem nenhuma processada → só restam erro/aguardando
-        if proc == 0:
+        # parada 2: lotes seguidos sem NENHUM progresso. Progresso = processada +
+        # sem_documentos (este último também vai ao ledger e some da seleção). Sem
+        # isso, um cluster de sem_documentos disparava a parada e encerrava o mês
+        # no meio, deixando tarefas processáveis mais abaixo na fila sem tentativa.
+        if progresso == 0:
             sem_progresso += 1
             if sem_progresso >= 2:
-                log(f"⏹️ FIM: 2 lotes sem processar nada — restam {erro} erro / {aguard} aguardando_docs "
+                log(f"⏹️ FIM: 2 lotes sem progresso — restam {erro} erro / {aguard} aguardando_docs "
                     f"(precisam de revisão humana). Encerrando.")
                 break
         else:
@@ -124,7 +139,7 @@ def main():
     else:
         log(f"⏹️ FIM: atingiu o teto de {args.max_lotes} lotes.")
 
-    log(f"RESUMO FINAL · processada={total_proc} · erro={total_erro} · aguardando={total_aguard} · pulada(idemp)={total_pulada}")
+    log(f"RESUMO FINAL · processada={total_proc} · sem_doc={total_semdoc} · erro={total_erro} · aguardando={total_aguard} · pulada(idemp)={total_pulada}")
 
 
 if __name__ == "__main__":
