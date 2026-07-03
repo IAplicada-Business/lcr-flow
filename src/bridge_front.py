@@ -436,19 +436,32 @@ def baixar_documentos_gestta(tarefa_id: str, comp_gestta: str, destino: str) -> 
 
 
 def detectar_tipo(nome: str) -> str:
-    """Mapeia o nome do arquivo para o enum documentos.tipo."""
+    """Mapeia o nome do arquivo para o enum documentos.tipo. É só uma DICA de
+    ROTEAMENTO — quem decide razão-vs-suporte de verdade é a IA na edge (por
+    CONTEÚDO). Por isso só extrato de conta corrente "limpo" vira 'extrato' (vai
+    pro parser local, extração barata); posição/investimento/cartão NÃO viram
+    'extrato' — vão pra edge, onde a IA separa movimento (razão) de posição/
+    suporte. Assim some o falso-positivo (posição nomeada "Extrato Posicao" virando
+    razão local) e o falso-negativo (extrato mal-nomeado virando suporte)."""
     n = nome.lower()
-    if any(k in n for k in ["extrato", "cta", "conta corrente"]):
-        return "extrato"
-    if any(k in n for k in ["nfe", "nf-e", "nota fiscal", "nfse", "nfs-e"]):
-        return "nf_entrada"
+    # posição/investimento → edge (mesmo com "extrato" no nome); a IA separa
+    # movimento de investimento (razão) de posição consolidada (suporte).
+    if any(k in n for k in ["posi", "consolidad", "investiment", "aplicac", "aplicaç",
+                            "renda fixa", "renda-fixa", "cdb", "fundo"]):
+        return "planilha_financeira"
+    # fatura/cartão → edge; a IA confirma como razão (fatura = fonte de movimento).
     if any(k in n for k in ["fatura", "cartao", "cartão"]):
         return "fatura_cartao"
+    if any(k in n for k in ["nfe", "nf-e", "nota fiscal", "nfse", "nfs-e"]):
+        return "nf_entrada"
     if any(k in n for k in ["darf", "das", "guia", "inss", "fgts", "gps"]):
         return "darf"
     if "recibo" in n:
         return "recibo"
-    if n.endswith((".xlsx", ".xls", ".csv")) or "planilha" in n or "investimento" in n:
+    # extrato de conta corrente "limpo" → parser local (extração barata).
+    if any(k in n for k in ["extrato", "cta", "conta corrente"]):
+        return "extrato"
+    if n.endswith((".xlsx", ".xls", ".csv")) or "planilha" in n or "fluxo" in n:
         return "planilha_financeira"
     return "outros"
 
