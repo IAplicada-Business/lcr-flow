@@ -25,11 +25,11 @@ async function saveSession() {
   console.log('========================================');
   console.log('\n 1° ACESSO (tela inicial do LevelCloud):');
   console.log(`    Usuário : ${process.env.SCI_USER_LEVEL}`);
-  console.log(`    Senha   : ${process.env.SCI_PASSWORD_LEVEL}`);
+  console.log('    Senha   : (definida em SCI_PASSWORD_LEVEL no .env)');
   console.log('\n   → Após clicar em Entrar, UMA NOVA TELA vai abrir.');
   console.log('\n 2° ACESSO (SCI Único — tela que abriu):');
   console.log(`    Usuário : ${process.env.SCI_EMAIL}`);
-  console.log(`    Senha   : ${process.env.SCI_PASSWORD}`);
+  console.log('    Senha   : (definida em SCI_PASSWORD no .env)');
   console.log('\n   → Aguarde carregar o painel do SCI Único.');
   console.log('\n   Se aparecer desafio Cloudflare, aguarde — ele resolve sozinho.');
   console.log('\n========================================');

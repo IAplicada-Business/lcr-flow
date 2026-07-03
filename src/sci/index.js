@@ -52,7 +52,7 @@ async function uploadLevelDrive(caminhoArquivo, _nomeEmpresa, _competencia) {
   const fileBuffer = fs.readFileSync(caminhoArquivo)
 
   console.log(`[LevelDrive] Fazendo upload via WebDAV...`)
-  console.log(`  Token    : ${LEVELDRIVE_TOKEN}`)
+  console.log(`  Token    : ${LEVELDRIVE_TOKEN ? LEVELDRIVE_TOKEN.slice(0, 4) + '…(oculto)' : '(vazio)'}`)
   console.log(`  Destino  : ${LEVELDRIVE_FOLDER}/${nomeArquivo}`)
   console.log(`  URL      : ${url}`)
 

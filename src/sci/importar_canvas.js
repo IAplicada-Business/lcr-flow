@@ -169,13 +169,19 @@ async function fazerLogin2(cp) {
   const RX   = parseFloat(process.env.SCI_LOGIN2_RX   || '0.227');
   const RY_U = parseFloat(process.env.SCI_LOGIN2_RY_U || '0.375');
 
+  const SCI_EMAIL = process.env.SCI_EMAIL;
+  const SCI_PASSWORD = process.env.SCI_PASSWORD;
+  if (!SCI_EMAIL || !SCI_PASSWORD) {
+    throw new Error('SCI_EMAIL e SCI_PASSWORD são obrigatórios no .env (sem fallback hardcoded).');
+  }
+
   await clickAt(RX, RY_U, 'campo Usuário');
   await cp.keyboard.press('Control+a');
   await ms(200);
-  await cp.keyboard.type(process.env.SCI_EMAIL || 'mariana.marques@lcr', { delay: 50 });
+  await cp.keyboard.type(SCI_EMAIL, { delay: 50 });
   await cp.keyboard.press('Tab');
   await ms(300);
-  await cp.keyboard.type(process.env.SCI_PASSWORD || 'Lcr@2205', { delay: 50 });
+  await cp.keyboard.type(SCI_PASSWORD, { delay: 50 });
   await cp.keyboard.press('Enter');
   await ms(800);
   await cp.keyboard.press('Escape'); // descarta eventual dialog de erro

@@ -20,6 +20,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
+const crypto = require('crypto');
 require('dotenv').config({ path: path.join(__dirname, '../.env') });
 
 const ROOT = path.join(__dirname, '..');
@@ -37,9 +38,26 @@ app.use(express.json({ limit: '256kb' }));
 
 let estado = { running: false, started_at: null, last: null };
 
+// Comparação de token em tempo constante (evita timing attack).
+function safeEqual(a, b) {
+  const ba = Buffer.from(String(a || ''));
+  const bb = Buffer.from(String(b || ''));
+  return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+}
+
+// Token do monitor: aceita via query (?token=) ou cookie httpOnly 'mon' — assim
+// os assets (screenshots) não precisam repetir o token na URL (evita vazar em
+// access log/histórico/referer).
+function tokenDoMonitor(req) {
+  if (req.query && req.query.token) return String(req.query.token);
+  const m = String(req.headers.cookie || '').match(/(?:^|;\s*)mon=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : '';
+}
+
 function auth(req, res, next) {
   const h = req.headers.authorization || '';
-  if (!TOKEN || h !== `Bearer ${TOKEN}`) {
+  const tok = h.startsWith('Bearer ') ? h.slice(7) : '';
+  if (!TOKEN || !safeEqual(tok, TOKEN)) {
     return res.status(401).json({ ok: false, error: 'unauthorized' });
   }
   next();
@@ -137,10 +155,13 @@ function chips(contagem) {
 }
 
 app.get('/monitor', (req, res) => {
-  if (!MONITOR_TOKEN || req.query.token !== MONITOR_TOKEN) {
+  if (!MONITOR_TOKEN || !safeEqual(tokenDoMonitor(req), MONITOR_TOKEN)) {
     return res.status(401).type('html').send('<body style="font-family:sans-serif;background:#0f172a;color:#e2e8f0;padding:2rem"><h2>401</h2><p>Use <code>/monitor?token=…</code> com o token do monitor.</p></body>');
   }
-  const tk = encodeURIComponent(req.query.token);
+  // Token válido pela query → grava cookie httpOnly p/ os assets não repetirem o token na URL.
+  if (req.query.token) {
+    res.cookie('mon', MONITOR_TOKEN, { httpOnly: true, sameSite: 'strict', secure: !!req.secure, maxAge: 12 * 3600 * 1000 });
+  }
   const runs = lerRunsRecentes(24);
   const ultimo = runs[0];
   // Agrega erros de todas as execuções recentes (não só a última), com motivo completo.
@@ -173,7 +194,7 @@ app.get('/monitor', (req, res) => {
     ? '<div class="muted">Nenhum erro nas últimas execuções. 🎉</div>'
     : erros.slice(0, 40).map((e) => `<div class="erro">
         <div><span class="dot" style="background:#dc2626"></span><b>${esc(e.cliente)}</b> <span class="muted">· ${brDate(e.quando)}</span>
-        ${e.shot ? ` · <a href="/monitor/shot?token=${tk}&f=${encodeURIComponent(e.shot)}" target="_blank">📷 screenshot</a>` : ''}</div>
+        ${e.shot ? ` · <a href="/monitor/shot?f=${encodeURIComponent(e.shot)}" target="_blank">📷 screenshot</a>` : ''}</div>
         <pre class="motivo">${esc(e.motivo)}</pre></div>`).join('');
 
   const stderrTail = (!estado.running && estado.stderr_tail) ? esc(estado.stderr_tail) : '';
@@ -199,7 +220,7 @@ a{color:#60a5fa}
 .motivo{margin:6px 0 0;white-space:pre-wrap;word-break:break-word;font-size:.78rem;color:#fca5a5;background:#1b1116;padding:8px;border-radius:6px;max-height:160px;overflow:auto}
 .count{background:#dc2626;color:#fff;border-radius:999px;padding:.05rem .5rem;font-size:.8rem;margin-left:6px}
 </style></head><body>
-<div class="top"><h1>🩺 LCR PROC-001 · Monitor <span class="muted" style="font-size:.8rem">VPS 206.189.229.35</span></h1>
+<div class="top"><h1>🩺 LCR PROC-001 · Monitor <span class="muted" style="font-size:.8rem">${esc(process.env.MONITOR_LABEL || 'VPS')}</span></h1>
 <div class="muted">${brDate(new Date().toISOString())} · atualiza a cada 60s</div></div>
 
 <div class="grid">
@@ -241,7 +262,7 @@ ${stderrTail ? `<div class="card" style="margin-bottom:14px"><h2>stderr da últi
 
 // Serve um screenshot de erro do Gestta (só-leitura, validado contra path traversal).
 app.get('/monitor/shot', (req, res) => {
-  if (!MONITOR_TOKEN || req.query.token !== MONITOR_TOKEN) return res.status(401).send('unauthorized');
+  if (!MONITOR_TOKEN || !safeEqual(tokenDoMonitor(req), MONITOR_TOKEN)) return res.status(401).send('unauthorized');
   const f = String(req.query.f || '');
   if (!/^[\w.\-]+\.png$/.test(f)) return res.status(400).send('arquivo inválido');
   const fp = path.join(ROOT, 'screenshots', f);

@@ -412,8 +412,10 @@ def _node_eval(js: str) -> str:
 
 def resolver_tarefa_gestta(termo: str, comp_gestta: str) -> dict | None:
     """Lista tarefas pendentes no Gestta e acha a do cliente (por código ou nome)."""
+    # json.dumps gera um literal de string JS válido (escapa aspas/barras) —
+    # evita injeção/quebra com nomes que tenham apóstrofo, aspas ou '\'.
     js = ("const g=require('./src/gestta/index.js');"
-          f"g.buscarTarefasPendentes('{comp_gestta}')"
+          f"g.buscarTarefasPendentes({json.dumps(comp_gestta)})"
           ".then(t=>console.log(JSON.stringify(t)))"
           ".catch(e=>{console.error(e.message);process.exit(1)});")
     tarefas = json.loads(_node_eval(js))
@@ -429,7 +431,7 @@ def baixar_documentos_gestta(tarefa_id: str, comp_gestta: str, destino: str) -> 
     destino = destino.replace("\\", "/")
     Path(destino).mkdir(parents=True, exist_ok=True)
     js = ("const g=require('./src/gestta/index.js');"
-          f"g.baixarDocumentosCliente('{tarefa_id}','{comp_gestta}','{destino}')"
+          f"g.baixarDocumentosCliente({json.dumps(tarefa_id)},{json.dumps(comp_gestta)},{json.dumps(destino)})"
           ".then(a=>console.log(JSON.stringify(a)))"
           ".catch(e=>{console.error(e.message);process.exit(1)});")
     return json.loads(_node_eval(js))
