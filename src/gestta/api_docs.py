@@ -143,7 +143,10 @@ def _bytes_validos(r: requests.Response, nome: str) -> bool:
     if len(corpo) < 100:
         log(f"    ⚠️ download muito pequeno ({len(corpo)}b), pulando: {nome}")
         return False
-    if "text/html" in ct or "xml" in ct:
+    # Erros da S3 vêm como application/xml (SignatureExpired etc.) ou text/html.
+    # NÃO usar "xml" in ct: o mime de .xlsx (...open*xml*formats...) casaria e
+    # derrubaria planilhas válidas. O sniff do corpo abaixo cobre o resto.
+    if ct.startswith("text/html") or ct.startswith("application/xml") or ct.startswith("text/xml"):
         log(f"    ⚠️ download com content-type {ct} (erro S3?), pulando: {nome}")
         return False
     inicio = corpo[:64].lstrip().lower()
