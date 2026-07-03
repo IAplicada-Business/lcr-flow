@@ -101,6 +101,44 @@ def sb_get(tabela: str, params: dict):
     return r.json()
 
 
+def sb_delete(tabela: str, match: dict):
+    """DELETE por filtros de igualdade. Ex.: sb_delete('lancamentos', {'documento_id': did}).
+    EXIGE ao menos um filtro (guarda contra apagar a tabela inteira sem querer)."""
+    if not match:
+        raise ValueError("sb_delete exige ao menos um filtro (match vazio apagaria tudo).")
+    params = {k: f"eq.{v}" for k, v in match.items()}
+    headers = {**SR_HEADERS, "Prefer": "return=minimal"}
+    r = requests.delete(f"{URL}/rest/v1/{tabela}", headers=headers, params=params, timeout=60)
+    if not r.ok:
+        raise RuntimeError(f"DELETE {tabela} falhou: {r.status_code} {r.text[:300]}")
+
+
+def get_all(tabela: str, params: dict, page: int = 1000) -> list:
+    """GET paginado (Range) — junta todas as linhas além do teto do PostgREST.
+    Substitui as paginações ad-hoc espalhadas pelos scripts."""
+    linhas, off = [], 0
+    while True:
+        headers = {**SR_HEADERS, "Range-Unit": "items", "Range": f"{off}-{off + page - 1}"}
+        r = requests.get(f"{URL}/rest/v1/{tabela}", headers=headers, params=params, timeout=60)
+        if not r.ok:
+            raise RuntimeError(f"GET {tabela} falhou: {r.status_code} {r.text[:300]}")
+        batch = r.json()
+        linhas.extend(batch)
+        if len(batch) < page:
+            break
+        off += page
+    return linhas
+
+
+def baixar_storage(bucket: str, path: str) -> bytes:
+    """Baixa um objeto do Storage (service role). Reusado pelos scripts de reprocesso
+    (antes cada um reimplementava o GET com SR_HEADERS)."""
+    r = requests.get(f"{URL}/storage/v1/object/{bucket}/{path}", headers=SR_HEADERS, timeout=120)
+    if not r.ok:
+        raise RuntimeError(f"DOWNLOAD {bucket}/{path} falhou: {r.status_code} {r.text[:200]}")
+    return r.content
+
+
 def sb_upload(bucket: str, path: str, conteudo: bytes, content_type: str):
     r = requests.post(
         f"{URL}/storage/v1/object/{bucket}/{path}",
