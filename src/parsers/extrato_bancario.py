@@ -207,6 +207,35 @@ def _competencia_ym(competencia):
     return None, None
 
 
+def _filtrar_janela_competencia(transacoes, competencia, meses=1):
+    """Mantém só transações a ±`meses` do mês da competência (índice absoluto
+    ano*12+mes, robusto à virada dez↔jan). Elimina contaminação de planilhas
+    Excel multi-ANO (ex.: aba única com linhas de 2024/2025 num extrato de 2026).
+    No-op se a competência não resolver. Fail-open: se removeria TUDO de uma
+    lista não-vazia, mantém a original e avisa. Retorna (filtradas, n_descartadas)."""
+    ano, mes = _competencia_ym(competencia)
+    if not ano:
+        return transacoes, 0
+    alvo = int(ano) * 12 + int(mes)
+    mantidas = []
+    for t in transacoes:
+        ym = (t.get('data') or '')[:7]
+        try:
+            y, m = ym.split('-')
+            idx = int(y) * 12 + int(m)
+        except (ValueError, AttributeError):
+            mantidas.append(t)  # sem data legível → conservador, mantém
+            continue
+        if abs(idx - alvo) <= meses:
+            mantidas.append(t)
+    n_desc = len(transacoes) - len(mantidas)
+    if transacoes and not mantidas:
+        print(f"  ⚠️ filtro de competência {competencia} removeria todas as "
+              f"{len(transacoes)} transações — mantendo original (fail-open)")
+        return transacoes, 0
+    return mantidas, n_desc
+
+
 def parsear_itau_excel(caminho: str, competencia: str = None) -> list:
     """
     Layout Itaú (Data | Descrição | Valor | Saldo; valor com sinal).
@@ -225,6 +254,10 @@ def parsear_itau_excel(caminho: str, competencia: str = None) -> list:
         tr = _parsear_itau_df(df)
         if not tr:
             return parsear_excel_generico(caminho)
+        if competencia:
+            tr, n_desc = _filtrar_janela_competencia(tr, competencia)
+            if n_desc:
+                print(f"  Itaú Excel: {n_desc} transação(ões) fora da janela de {competencia} descartada(s)")
         print(f"  Itaú Excel: {len(tr)} transações extraídas")
         return tr
 
@@ -243,7 +276,9 @@ def parsear_itau_excel(caminho: str, competencia: str = None) -> list:
         score = n_ym * 10000 + n_ano * 100 + len(tr)
         if score > melhor_score:
             melhor, melhor_score, melhor_sh = tr, score, sh
-    print(f"  Itaú Excel (multi-aba): aba '{melhor_sh}' escolhida p/ competência {competencia} — {len(melhor)} transações")
+    melhor, n_desc = _filtrar_janela_competencia(melhor, competencia)
+    print(f"  Itaú Excel (multi-aba): aba '{melhor_sh}' escolhida p/ competência {competencia} — "
+          f"{len(melhor)} transações" + (f" ({n_desc} fora da janela descartada(s))" if n_desc else ""))
     return melhor
 
 
