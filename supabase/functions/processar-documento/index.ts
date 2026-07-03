@@ -37,17 +37,21 @@ Marque como 'extrato_bancario' SEMPRE que o documento contenha TODOS os 3 elemen
    (c) Tabela cronológica de movimentações do período com data + descrição +
        valor + saldo parcial (várias linhas mostrando entradas E saídas)
 
-Formatos comuns aceitos como extrato:
+Formatos aceitos como extrato (GERAM lançamentos — razão):
 - Extrato Itaú simplificado (uma coluna VALOR com sinal + coluna SALDO)
 - Extrato Itaú completo (colunas DÉBITO/CRÉDITO separadas + SALDO)
 - Extratos Bradesco, Santander, BB, Caixa, Nubank, Inter etc. no mesmo formato
 - Posição consolidada de conta corrente (com saldo início/fim)
+- Fatura/extrato de CARTÃO de crédito: cada compra/lançamento da fatura vira UM
+  lançamento (é fonte de movimento, entra na razão).
+- Extrato de MOVIMENTO de conta de investimento (aplicações, resgates, rendimentos
+  do período, com datas) — cada movimento vira lançamento.
 
-NÃO é extrato bancário:
+NÃO é extrato bancário (documento SUPORTE → lancamentos_sugeridos = []):
 - Comprovante único de PIX/TED/DOC (mesmo que tenha "saldo disponível" no rodapé)
 - Vários comprovantes agrupados num PDF (é 'comprovante', não extrato)
-- Posição de investimentos/CDB/renda fixa/poupança (é 'planilha_financeira')
-- Fatura de cartão de crédito (é 'fatura')
+- POSIÇÃO de investimentos/CDB/renda fixa/poupança (foto dos papéis, SEM
+  movimentação do período → é 'planilha_financeira')
 
 REGRA ESPECÍFICA — POSIÇÃO CONSOLIDADA DE INVESTIMENTO (planilha_financeira):
 Se o CSV/XLS contém QUALQUER uma destas colunas, é 'planilha_financeira' e
@@ -58,9 +62,10 @@ não gera lançamento contábil):
    Cotas, ValorDaCota, PU, Quantidade
 
 DEFINIÇÕES ADICIONAIS:
-* 'planilha_financeira' = posição consolidada de investimentos (CDB, renda
-  fixa, poupança), extratos de aplicações financeiras, fluxos de caixa em
-  planilha própria do cliente.
+* 'planilha_financeira' = POSIÇÃO consolidada de investimentos (CDB, renda fixa,
+  poupança — foto dos papéis) e fluxos de caixa em planilha própria do cliente.
+  (Atenção: o MOVIMENTO de uma conta de investimento — aplicações/resgates/
+  rendimentos COM data no período — é 'extrato', gera lançamentos, NÃO planilha.)
 * 'comprovante' = comprovantes avulsos de pagamento/transferência (1 PIX,
   1 TED, 1 DOC), ainda que agrupados num PDF — são só a prova, NÃO substituem
   o extrato bancário. Só use este tipo se NÃO houver saldo anterior/final +
@@ -76,10 +81,14 @@ DEFINIÇÕES ADICIONAIS:
 
 Regras:
 - Use EXCLUSIVAMENTE códigos de conta e de histórico que existem no plano de contas e na lista de históricos passados no contexto (contas analíticas/folhas).
-- Extrato bancário: cada movimentação vira UM lançamento (fonte única de razão).
-- NF-e/Recibo/Planilha/Comprovante: NÃO gere lançamentos (o sistema os usa como
-  documento SUPORTE para enriquecer as linhas do extrato). Retorne
-  lancamentos_sugeridos = [].
+- Extrato bancário / fatura de cartão / movimento de conta de investimento: cada
+  movimentação vira UM lançamento (fonte de razão).
+- ANTI-DUPLICAÇÃO: o PAGAMENTO de fatura de cartão que aparece no extrato BANCÁRIO
+  tem contrapartida "cartão a pagar" (ou transferência), NÃO uma despesa — a
+  despesa já foi lançada nas compras da fatura; não conte em dobro.
+- NF-e/Recibo/Planilha/Comprovante/Fluxo de caixa/POSIÇÃO de investimento: NÃO
+  gere lançamentos (o sistema os usa como documento SUPORTE para enriquecer as
+  linhas do extrato). Retorne lancamentos_sugeridos = [].
 - Para documentos de SUPORTE (NF-e, recibo, DARF, fatura, comprovante), preencha
   o objeto dados_suporte com: valor_total (valor total do documento, positivo),
   data_documento (AAAA-MM-DD), participante (fornecedor/tomador/favorecido) e
@@ -358,7 +367,11 @@ Deno.serve(async (req) => {
   }
 
   const tipoMapeado = mapearTipoIa(classificacao.tipo_documento);
-  const isExtrato = doc.tipo === "extrato" || tipoMapeado === "extrato";
+  // A IA (conteúdo) é a palavra final — NÃO o nome do arquivo (doc.tipo). Gera
+  // razão quando classifica como extrato bancário OU fatura/cartão (a fatura é
+  // fonte de movimento: cada compra vira lançamento). Posição de investimento,
+  // NF, recibo, DARF, fluxo de caixa e planilha NÃO geram razão (são suporte).
+  const isExtrato = tipoMapeado === "extrato" || tipoMapeado === "fatura_cartao";
   const tipoFinal = isExtrato ? "extrato" : (tipoMapeado && tipoMapeado !== doc.tipo ? tipoMapeado : doc.tipo);
   if (tipoFinal !== doc.tipo) {
     await admin.from("documentos").update({ tipo: tipoFinal }).eq("id", documento_id);
