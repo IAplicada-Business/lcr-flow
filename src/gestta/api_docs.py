@@ -14,9 +14,12 @@ de listar_cobrancas_api). O download final é numa URL S3 já assinada (jwt=None
 Contratos (drop-in dos passos browser):
   suficiencia(detalhe) -> {observacao, documentos:[{nome,status,numArquivos}],
                            suficiente, pendentes}
-  baixar_documentos(...) -> list[str]  (caminhos salvos; [] se nada)
+  baixar_documentos(...) -> {"salvos": list[str], "falhas": list[{arquivo,motivo}]}
+      salva os arquivos OK e sinaliza os que falharam (após retry) — o caller
+      marca a tarefa INCOMPLETA em vez de perder documento em silêncio.
 """
 
+import re
 import time
 from pathlib import Path
 
@@ -135,66 +138,91 @@ def _nome_unico(nome: str, usados: set) -> str:
         i += 1
 
 
-def _bytes_validos(r: requests.Response, nome: str) -> bool:
-    """Rejeita respostas de erro da S3 (XML/HTML curto, ex.: 403 SignatureExpired)
-    gravadas no lugar do arquivo real."""
-    ct = (r.headers.get("content-type") or "").lower()
+def _classificar_download(r: requests.Response, file_name: str):
+    """Classifica a resposta do GET na S3. Retorna ('salva', '') p/ documento
+    válido — binário (PDF/xlsx/imagem), .xls/.xlsx-que-é-HTML (export BR) ou XML
+    fiscal (NFe/NFS-e) — ou ('falha', motivo) p/ erro real da S3 (<Error>),
+    página HTML de erro ou resposta vazia.
+    Distinção-chave: só o erro da S3 tem <Error>; NFe começa com <?xml e o
+    export BR começa com <html mas SÃO documentos — não descartar por serem xml/html."""
     corpo = r.content or b""
+    cabeca = corpo[:512].lstrip().lower()
+    ext = file_name.lower().rsplit(".", 1)[-1] if "." in file_name else ""
+
+    if r.status_code != 200:
+        return "falha", f"HTTP {r.status_code}"
+    if b"<error>" in cabeca:  # erro da S3 (SignatureDoesNotMatch/AccessDenied/…)
+        m = re.search(rb"<code>([^<]+)</code>", corpo[:512], re.IGNORECASE)
+        cod = m.group(1).decode(errors="ignore") if m else ""
+        return "falha", f"erro S3 {cod}".strip()
+    if cabeca.startswith(b"<html"):
+        # .xls/.xlsx-que-é-HTML e .html são documentos legítimos (export BR) → salva.
+        if ext in ("xls", "xlsx", "html", "htm"):
+            return "salva", ""
+        return "falha", "HTML inesperado (página de erro?)"
     if len(corpo) < 100:
-        log(f"    ⚠️ download muito pequeno ({len(corpo)}b), pulando: {nome}")
-        return False
-    # Erros da S3 vêm como application/xml (SignatureExpired etc.) ou text/html.
-    # NÃO usar "xml" in ct: o mime de .xlsx (...open*xml*formats...) casaria e
-    # derrubaria planilhas válidas. O sniff do corpo abaixo cobre o resto.
-    if ct.startswith("text/html") or ct.startswith("application/xml") or ct.startswith("text/xml"):
-        log(f"    ⚠️ download com content-type {ct} (erro S3?), pulando: {nome}")
-        return False
-    inicio = corpo[:64].lstrip().lower()
-    if inicio.startswith(b"<?xml") or inicio.startswith(b"<html") or b"<error>" in inicio:
-        log(f"    ⚠️ download parece XML/HTML de erro, pulando: {nome}")
-        return False
-    return True
+        return "falha", f"resposta muito pequena ({len(corpo)}b)"
+    return "salva", ""
 
 
-def baixar_documentos(detalhe: dict, destino: str, jwt: str) -> list:
+def _baixar_arquivo(task_id, doc_id, customer_id, file_id, file_name, jwt, tentativas=3):
+    """Baixa 1 arquivo: POST (obtém URL S3 assinada) + GET (S3). Em falha de
+    download (assinatura expirada, erro S3), RETENTA com uma URL NOVA — refaz o
+    POST, pois re-GET na mesma URL vencida falharia sempre. Retorna (bytes, None)
+    no sucesso ou (None, motivo) após esgotar. Propaga SESSAO_EXPIRADA (aborta a
+    tarefa p/ relogin no orquestrador)."""
+    motivo = "desconhecido"
+    for i in range(tentativas):
+        try:
+            r1 = _req("POST", f"{API}/accounting/pendency/document/download", jwt,
+                      json={"customer_task": task_id, "document": doc_id,
+                            "customer": customer_id, "file": file_id})
+            url = (r1.text or "").strip().strip('"').strip()
+            if not url.lower().startswith("http"):
+                motivo = f"sem URL de download ({url[:80]})"
+            else:
+                r2 = _req("GET", url, jwt=None)  # URL já assinada → sem Authorization
+                cls, m = _classificar_download(r2, file_name)
+                if cls == "salva":
+                    return r2.content, None
+                motivo = m
+        except RuntimeError as e:
+            if "SESSAO_EXPIRADA" in str(e):
+                raise
+            motivo = str(e)[:120]
+        if i < tentativas - 1:
+            time.sleep(1.5)  # janela p/ a URL nova; backoff leve
+    return None, motivo
+
+
+def baixar_documentos(detalhe: dict, destino: str, jwt: str):
     """Baixa via REST todos os arquivos de documentos NÃO desconsiderados.
-    Fluxo por arquivo: POST .../document/download → corpo = URL S3 assinada →
-    GET nessa URL (sem Authorization) → bytes → salva em destino.
-    Retorna a lista de caminhos salvos (contrato de baixarDocumentosCliente)."""
+    Cada arquivo: POST (URL S3 assinada) + GET (bytes), com retry em falha de
+    download (_baixar_arquivo). Salva os que vieram OK e coleta os que falharam.
+    Retorna {"salvos": [caminhos], "falhas": [{arquivo, motivo}]}. Assim o caller
+    processa os OK e marca a tarefa como INCOMPLETA quando há falhas — nunca perde
+    documento em silêncio.
+    Propaga SESSAO_EXPIRADA (aborta a tarefa p/ relogin no orquestrador)."""
     Path(destino).mkdir(parents=True, exist_ok=True)
     task_id = detalhe.get("_id")
     customer_id = _customer_id(detalhe)
-    salvos, usados = [], set()
+    salvos, falhas, usados = [], [], set()
 
     for d in _requested_documents(detalhe):
         if d.get("disconsidered"):
             continue
         for f in (d.get("files") or []):
             file_name = f.get("file_name") or f.get("_id") or "arquivo"
-            try:
-                # passo 1: obter a URL S3 assinada (corpo = a própria URL, não JSON)
-                r1 = _req("POST", f"{API}/accounting/pendency/document/download", jwt,
-                          json={"customer_task": task_id, "document": d.get("_id"),
-                                "customer": customer_id, "file": f.get("_id")})
-                url = (r1.text or "").strip().strip('"').strip()
-                if not url.lower().startswith("http"):
-                    log(f"    ⚠️ sem URL de download p/ {file_name}: {url[:120]}")
-                    continue
-                # passo 2: baixar da S3 (URL já assinada → sem header Authorization)
-                r2 = _req("GET", url, jwt=None)
-                if not _bytes_validos(r2, file_name):
-                    continue
-                nome = _nome_unico(file_name, usados)
-                caminho = Path(destino) / nome
-                caminho.write_bytes(r2.content)
-                salvos.append(str(caminho))
-                log(f"    ✓ baixado: {nome} ({len(r2.content)}b)")
-                time.sleep(0.3)  # espalha a carga na API do Gestta
-            except Exception as e:
-                # sessão expirada aborta a tarefa (retry/relogin no orquestrador);
-                # falha isolada de 1 arquivo não derruba os demais.
-                if "SESSAO_EXPIRADA" in str(e):
-                    raise
-                log(f"    ⚠️ falha ao baixar {file_name}: {str(e)[:160]}")
+            conteudo, motivo = _baixar_arquivo(
+                task_id, d.get("_id"), customer_id, f.get("_id"), file_name, jwt)
+            if conteudo is None:
+                log(f"    FALHA: {file_name}: {motivo}")
+                falhas.append({"arquivo": file_name, "motivo": motivo})
                 continue
-    return salvos
+            nome = _nome_unico(file_name, usados)
+            caminho = Path(destino) / nome
+            caminho.write_bytes(conteudo)
+            salvos.append(str(caminho))
+            log(f"    OK baixado: {nome} ({len(conteudo)}b)")
+            time.sleep(0.3)  # espalha a carga na API do Gestta
+    return {"salvos": salvos, "falhas": falhas}

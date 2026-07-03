@@ -435,10 +435,15 @@ def processar_tarefa_api(t: dict, competencia: str, comp_g: str, jwt: str, jwt_g
     banco = resolver_banco(empresa_id) or BANCO_PADRAO
     destino = str(ROOT / "outputs" / "gestta" / f"{empresa_id}_{comp_mov}")
     try:
-        arquivos = api_docs.baixar_documentos(detalhe, destino, jwt_gestta)
+        dl = api_docs.baixar_documentos(detalhe, destino, jwt_gestta)
+        arquivos, falhas_dl = dl["salvos"], dl["falhas"]
     except Exception as e:
         return {**base, "status": "erro", "motivo": f"download(api): {str(e)[:600]}"}
     if not arquivos:
+        # Nada salvo. Se houve falhas de download, é erro (reprocessar), não "sem docs".
+        if falhas_dl:
+            motivo = f"download(api): {len(falhas_dl)} arquivo(s) falharam (ex.: {falhas_dl[0].get('motivo','')[:80]})"
+            return {**base, "status": "erro", "motivo": motivo, "falhas_download": falhas_dl}
         return {**base, "status": "sem_documentos", "motivo": "API: 0 arquivos baixáveis"}
 
     try:
@@ -455,8 +460,16 @@ def processar_tarefa_api(t: dict, competencia: str, comp_g: str, jwt: str, jwt_g
 
     extratos = resumo.get("extratos", [])
     lanc = sum(e.get("lancamentos", 0) for e in extratos)
-    return {**base, "status": "processada", "banco": banco, "consultor": resp,
-            "lancamentos_extrato": lanc, "outros_docs": len(resumo.get("outros", []))}
+    resultado = {**base, "banco": banco, "consultor": resp,
+                 "lancamentos_extrato": lanc, "outros_docs": len(resumo.get("outros", []))}
+    # Parte dos arquivos falhou no download → tarefa INCOMPLETA (não vira 'processada'
+    # no ledger; os OK ficam salvos, o restante é sinalizado p/ reprocesso/revisão).
+    if falhas_dl:
+        resultado["status"] = "incompleta"
+        resultado["falhas_download"] = falhas_dl
+    else:
+        resultado["status"] = "processada"
+    return resultado
 
 
 def main():
@@ -530,7 +543,14 @@ def main():
         # nunca derruba o run inteiro; tenta 1x novamente antes de desistir.
         r = processar_com_retry(t, args.competencia, comp_g, jwt, via_api=args.via_api,
                                 jwt_gestta=jwt_gestta, ignorar_suficiencia=args.ignorar_suficiencia)
-        log(f"    → {r['status']}" + (f" ({r.get('motivo') or r.get('faltando') or ''})" if r['status'] != 'processada' else f" · {r.get('lancamentos_extrato',0)} lançamentos"))
+        if r['status'] == 'processada':
+            extra = f" · {r.get('lancamentos_extrato', 0)} lançamentos"
+        elif r['status'] == 'incompleta':
+            extra = (f" · {r.get('lancamentos_extrato', 0)} lançamentos, "
+                     f"{len(r.get('falhas_download', []))} arquivo(s) falharam no download")
+        else:
+            extra = f" ({r.get('motivo') or r.get('faltando') or ''})"
+        log(f"    → {r['status']}{extra}")
         if r.get("status") in ("processada", "sem_documentos"):
             marcar_processada(r.get("empresa_id"), r.get("competencia_movimento") or args.competencia)
         resultados.append(r)

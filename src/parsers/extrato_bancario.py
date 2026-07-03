@@ -106,37 +106,25 @@ def parsear_extrato(caminho: str, banco: str = None, competencia: str = None) ->
     print(f"Parseando extrato: {Path(caminho).name} (banco: {banco}, formato: {extensao})")
 
     if extensao in ['.xlsx', '.xls']:
-        return parsear_excel(caminho, banco, competencia)
+        tr = parsear_excel(caminho, competencia)
     elif extensao == '.pdf':
-        return parsear_pdf(caminho, banco)
+        tr = parsear_pdf(caminho, banco)
     else:
         raise ValueError(f"Formato não suportado: {extensao}")
 
+    # Filtro de janela de competência aplicado AQUI (ponto único por onde TODOS os
+    # formatos passam) → cobre Excel E PDF, e qualquer banco. Elimina contaminação
+    # de extratos multi-ano/multi-mês (linhas de anos alheios na competência).
+    if competencia:
+        tr, n_desc = _filtrar_janela_competencia(tr, competencia)
+        if n_desc:
+            print(f"  Filtro de competência {competencia}: {n_desc} transação(ões) fora da janela descartada(s)")
+    return tr
+
 
 # ─────────────────────────────────────────────
-# Parsers Excel por banco
+# Parser Excel (genérico p/ qualquer banco — detecção de coluna por NOME)
 # ─────────────────────────────────────────────
-
-def parsear_excel(caminho: str, banco: str, competencia: str = None) -> list:
-    """Parseia extrato em Excel conforme layout do banco."""
-
-    parsers_excel = {
-        'itau': parsear_itau_excel,
-        'bradesco': parsear_bradesco_excel,
-        'santander': parsear_santander_excel,
-        'banco_brasil': parsear_bb_excel,
-        'caixa': parsear_caixa_excel,
-        'inter': parsear_inter_excel,
-    }
-
-    parser = parsers_excel.get(banco)
-    if parser:
-        # Só o Itaú usa competência (p/ escolher a aba em planilha multi-aba).
-        return parser(caminho, competencia) if banco == 'itau' else parser(caminho)
-    else:
-        # Fallback genérico para bancos não mapeados
-        return parsear_excel_generico(caminho)
-
 
 def _idx_coluna(colunas, termos, excluir=(), default=None):
     """Índice POSICIONAL da 1ª coluna cujo cabeçalho contém algum de `termos`
@@ -150,9 +138,16 @@ def _idx_coluna(colunas, termos, excluir=(), default=None):
     return default
 
 
-def _parsear_itau_df(df) -> list:
-    """Extrai transações de UMA planilha (dataframe, lido com header=None) no
-    layout Itaú. Retorna [] se não achar o cabeçalho (sem fallback aqui)."""
+def _parsear_planilha_df(df) -> list:
+    """Parser UNIVERSAL de uma planilha (dataframe lido com header=None). Detecta
+    colunas por NOME e cobre os 3 esquemas de valor dos bancos BR — sem função
+    por banco:
+      (a) coluna única 'valor' COM SINAL (ex.: Itaú);
+      (b) colunas SEPARADAS 'crédito'/'débito' (ex.: Bradesco, BB);
+      (c) 'valor' + indicador 'D/C'/'tipo' (ex.: Santander).
+    Retorna [] se não achar cabeçalho OU nenhum esquema de valor (data + valor/
+    crédito/débito) — o caller então roteia p/ a edge (IA). SEM default posicional
+    (chutar 0/1/2 foi a raiz do bug 'R$ 7 bi')."""
     header_row = None
     for i, row in df.iterrows():
         valores = [str(v).strip().lower() for v in row.values if pd.notna(v)]
@@ -166,31 +161,60 @@ def _parsear_itau_df(df) -> list:
     df = df.iloc[header_row + 1:].reset_index(drop=True)
     df = df.dropna(how='all')
 
-    # Localiza colunas por nome (layouts do Itaú variam: alguns exports têm
-    # "Documento" entre Histórico e Valor, deslocando as posições fixas).
-    i_data  = _idx_coluna(colunas, ('data',), default=0)
-    i_desc  = _idx_coluna(colunas, ('histór', 'descri', 'lanç', 'moviment'), default=1)
-    i_valor = _idx_coluna(colunas, ('valor',), excluir=('saldo',), default=2)
+    i_data    = _idx_coluna(colunas, ('data',))
+    i_desc    = _idx_coluna(colunas, ('histór', 'descri', 'lanç', 'moviment', 'memo'))
+    # Crédito/débito cobrem os nomes usados pelos bancos BR: crédito/débito
+    # (Bradesco/BB) e entradas/saídas (Itaú "extrato comentado").
+    i_credito = _idx_coluna(colunas, ('créd', 'cred', 'entrada'))
+    i_debito  = _idx_coluna(colunas, ('déb', 'deb', 'saída', 'saida'))
+    i_valor   = _idx_coluna(colunas, ('valor', 'amount'), excluir=('saldo',))
+    i_dc      = _idx_coluna(colunas, ('d/c', 'tipo', 'natur'))
+
+    # Esquema de valor: par crédito/débito em colunas separadas vs coluna única
+    # 'valor'. Usa cred/déb quando há o PAR, ou quando há um dos lados e NÃO há
+    # 'valor' (evita falso-positivo quando existe 'valor' + coluna que casa
+    # 'entrada/saída' por acaso).
+    usar_credeb = (i_credito is not None and i_debito is not None) or \
+                  ((i_credito is not None or i_debito is not None) and i_valor is None)
+    if i_data is None or not (usar_credeb or i_valor is not None):
+        return []  # layout não reconhecido → caller roteia p/ edge/revisão
+
+    def _cel(row, idx):
+        return str(row.iloc[idx]).strip() if idx is not None else ""
 
     transacoes = []
     for _, row in df.iterrows():
         try:
-            data_raw = str(row.iloc[i_data]).strip()
-            descricao = str(row.iloc[i_desc]).strip()
-            valor_raw = row.iloc[i_valor]
+            data_raw = _cel(row, i_data)
+            if not data_raw or data_raw == 'nan':
+                continue
+            data = normalizar_data(data_raw)
+            descricao = _cel(row, i_desc)
 
-            if pd.isna(valor_raw) or not data_raw or data_raw == 'nan':
+            # (b) crédito/débito (ou entradas/saídas) em colunas separadas → 1-2 lançamentos
+            if usar_credeb:
+                cred = _parse_valor(row.iloc[i_credito]) if i_credito is not None else None
+                deb  = _parse_valor(row.iloc[i_debito])  if i_debito  is not None else None
+                cred = abs(cred) if cred else 0.0
+                deb  = abs(deb) if deb else 0.0
+                if cred > 0:
+                    transacoes.append({'data': data, 'descricao': descricao, 'valor': cred, 'tipo': 'credito'})
+                if deb > 0:
+                    transacoes.append({'data': data, 'descricao': descricao, 'valor': deb, 'tipo': 'debito'})
                 continue
 
-            data = normalizar_data(data_raw)
-            valor = _parse_valor(valor_raw)
-
-            transacoes.append({
-                'data': data,
-                'descricao': descricao,
-                'valor': abs(valor),
-                'tipo': 'debito' if valor < 0 else 'credito'
-            })
+            # (a)/(c) coluna única de valor: sinal manda; D/C só desempata positivos.
+            valor = _parse_valor(row.iloc[i_valor])
+            if valor is None:
+                continue
+            if valor < 0:
+                tipo = 'debito'
+            elif i_dc is not None:
+                dc = _cel(row, i_dc).upper()
+                tipo = 'debito' if dc in ('D', 'DEB', 'DÉBITO', 'DEBITO') else 'credito'
+            else:
+                tipo = 'credito'
+            transacoes.append({'data': data, 'descricao': descricao, 'valor': abs(valor), 'tipo': tipo})
         except (ValueError, IndexError):
             continue
     return transacoes
@@ -211,8 +235,9 @@ def _filtrar_janela_competencia(transacoes, competencia, meses=1):
     """Mantém só transações a ±`meses` do mês da competência (índice absoluto
     ano*12+mes, robusto à virada dez↔jan). Elimina contaminação de planilhas
     Excel multi-ANO (ex.: aba única com linhas de 2024/2025 num extrato de 2026).
-    No-op se a competência não resolver. Fail-open: se removeria TUDO de uma
-    lista não-vazia, mantém a original e avisa. Retorna (filtradas, n_descartadas)."""
+    No-op se a competência não resolver. Se TODAS caírem fora da janela (arquivo
+    do período errado), devolve vazio e avisa — NÃO re-admite as transações fora
+    da janela (isso reintroduziria a contaminação). Retorna (filtradas, n_descartadas)."""
     ano, mes = _competencia_ym(competencia)
     if not ano:
         return transacoes, 0
@@ -230,19 +255,58 @@ def _filtrar_janela_competencia(transacoes, competencia, meses=1):
             mantidas.append(t)
     n_desc = len(transacoes) - len(mantidas)
     if transacoes and not mantidas:
-        print(f"  ⚠️ filtro de competência {competencia} removeria todas as "
-              f"{len(transacoes)} transações — mantendo original (fail-open)")
-        return transacoes, 0
+        # Nenhuma na janela: arquivo do período errado (ou competência ausente do
+        # arquivo). Devolve vazio → o caller trata (0 transações → revisão/edge).
+        print(f"  AVISO: NENHUMA das {len(transacoes)} transações está na janela de "
+              f"{competencia} — arquivo possivelmente do período errado; descartando todas.")
     return mantidas, n_desc
 
 
-def parsear_itau_excel(caminho: str, competencia: str = None) -> list:
-    """
-    Layout Itaú (Data | Descrição | Valor | Saldo; valor com sinal).
-    Se o arquivo tiver VÁRIAS abas (ex.: planilha anual com uma aba por mês) e
-    `competencia` for informada, escolhe a aba cujas transações mais casam com a
-    competência (AAAA-MM) — evita ler a aba errada. Uma aba só = comportamento padrão.
-    """
+def _e_html(caminho: str) -> bool:
+    """True se o arquivo é HTML (muitos bancos exportam .xls/.xlsx que na verdade
+    são HTML — xlrd/openpyxl quebram neles)."""
+    try:
+        with open(caminho, "rb") as fh:
+            ini = fh.read(512).lstrip().lower()
+    except Exception:
+        return False
+    return ini.startswith(b"<") or b"<html" in ini or b"<table" in ini
+
+
+def _parsear_html(caminho: str) -> list:
+    """Lê extrato que é HTML disfarçado de Excel. Usa read_html, roda cada tabela
+    pelo MESMO parser universal (_parsear_planilha_df) e devolve a que rende mais
+    transações."""
+    try:
+        # thousands=None desliga a conversão de milhar do read_html (padrão ','),
+        # que senão mangleria valores BR: "-50,00" viraria "-5000". Assim as células
+        # ficam string crua ("1.234,56", "-50,00") e o _parse_valor faz a conversão
+        # BR correta por célula. (bug pego em teste local.)
+        tabelas = pd.read_html(caminho, thousands=None)
+    except Exception:
+        return []
+    melhor = []
+    for df in tabelas:
+        try:
+            tr = _parsear_planilha_df(df)
+        except Exception:
+            tr = []
+        if len(tr) > len(melhor):
+            melhor = tr
+    print(f"  Excel-HTML: {len(melhor)} transações extraídas")
+    return melhor
+
+
+def parsear_excel(caminho: str, competencia: str = None) -> list:
+    """Parseia extrato em Excel (genérico p/ qualquer banco; detecção de coluna
+    por NOME). Trata também .xls/.xlsx que são HTML disfarçado (export BR). Se o
+    arquivo tiver VÁRIAS abas (ex.: planilha anual, uma aba por mês) e `competencia`
+    for informada, escolhe a aba cujas transações mais casam com a competência
+    (AAAA-MM). O filtro fino de janela de competência é aplicado em parsear_extrato
+    (ponto único que cobre Excel e PDF)."""
+    if _e_html(caminho):
+        return _parsear_html(caminho)
+
     engine = 'xlrd' if caminho.endswith('.xls') else 'openpyxl'
     try:
         sheets = pd.ExcelFile(caminho, engine=engine).sheet_names
@@ -251,14 +315,8 @@ def parsear_itau_excel(caminho: str, competencia: str = None) -> list:
 
     if len(sheets) <= 1 or not competencia:
         df = pd.read_excel(caminho, engine=engine, sheet_name=(sheets[0] if sheets else 0), header=None)
-        tr = _parsear_itau_df(df)
-        if not tr:
-            return parsear_excel_generico(caminho)
-        if competencia:
-            tr, n_desc = _filtrar_janela_competencia(tr, competencia)
-            if n_desc:
-                print(f"  Itaú Excel: {n_desc} transação(ões) fora da janela de {competencia} descartada(s)")
-        print(f"  Itaú Excel: {len(tr)} transações extraídas")
+        tr = _parsear_planilha_df(df)
+        print(f"  Excel: {len(tr)} transações extraídas")
         return tr
 
     # Multi-aba + competência: pontua cada aba e escolhe a que melhor casa
@@ -268,7 +326,7 @@ def parsear_itau_excel(caminho: str, competencia: str = None) -> list:
     melhor, melhor_score, melhor_sh = [], -1, None
     for sh in sheets:
         try:
-            tr = _parsear_itau_df(pd.read_excel(caminho, engine=engine, sheet_name=sh, header=None))
+            tr = _parsear_planilha_df(pd.read_excel(caminho, engine=engine, sheet_name=sh, header=None))
         except Exception:
             tr = []
         n_ym = sum(1 for t in tr if (t.get('data') or '')[:7] == alvo_ym) if alvo_ym else 0
@@ -276,231 +334,10 @@ def parsear_itau_excel(caminho: str, competencia: str = None) -> list:
         score = n_ym * 10000 + n_ano * 100 + len(tr)
         if score > melhor_score:
             melhor, melhor_score, melhor_sh = tr, score, sh
-    melhor, n_desc = _filtrar_janela_competencia(melhor, competencia)
-    print(f"  Itaú Excel (multi-aba): aba '{melhor_sh}' escolhida p/ competência {competencia} — "
-          f"{len(melhor)} transações" + (f" ({n_desc} fora da janela descartada(s))" if n_desc else ""))
+    print(f"  Excel (multi-aba): aba '{melhor_sh}' escolhida p/ competência {competencia} — {len(melhor)} transações")
     return melhor
 
 
-def parsear_bradesco_excel(caminho: str) -> list:
-    """
-    Layout típico do Bradesco:
-    Colunas: Data | Histórico | Docto | Crédito(R$) | Débito(R$) | Saldo(R$)
-    Créditos e Débitos em colunas separadas
-    """
-    df = pd.read_excel(caminho, engine='xlrd' if caminho.endswith('.xls') else 'openpyxl',
-                       header=None)
-
-    header_row = None
-    for i, row in df.iterrows():
-        valores = [str(v).strip().lower() for v in row.values if pd.notna(v)]
-        if 'histórico' in valores or 'historico' in valores:
-            header_row = i
-            break
-
-    if header_row is None:
-        return parsear_excel_generico(caminho)
-
-    df.columns = df.iloc[header_row]
-    df = df.iloc[header_row + 1:].reset_index(drop=True)
-    df = df.dropna(how='all')
-
-    colunas = list(df.columns)
-    i_data = _idx_coluna(colunas, ('data',), default=0)
-    i_desc = _idx_coluna(colunas, ('histór', 'descri', 'lanç', 'moviment'), default=1)
-
-    transacoes = []
-    for _, row in df.iterrows():
-        try:
-            data_raw = str(row.iloc[i_data]).strip()
-            if not data_raw or data_raw == 'nan':
-                continue
-
-            descricao = str(row.iloc[i_desc]).strip()
-
-            # Identifica colunas de crédito e débito
-            credito = 0.0
-            debito = 0.0
-            for col in row.index:
-                col_lower = str(col).lower()
-                if 'créd' in col_lower or 'cred' in col_lower:
-                    v = row[col]
-                    if pd.notna(v):
-                        credito = _parse_valor(v)
-                elif 'déb' in col_lower or 'deb' in col_lower:
-                    v = row[col]
-                    if pd.notna(v):
-                        debito = _parse_valor(v)
-
-            data = normalizar_data(data_raw)
-
-            if credito > 0:
-                transacoes.append({
-                    'data': data,
-                    'descricao': descricao,
-                    'valor': credito,
-                    'tipo': 'credito'
-                })
-            if debito > 0:
-                transacoes.append({
-                    'data': data,
-                    'descricao': descricao,
-                    'valor': debito,
-                    'tipo': 'debito'
-                })
-
-        except (ValueError, IndexError):
-            continue
-
-    print(f"  Bradesco Excel: {len(transacoes)} transações extraídas")
-    return transacoes
-
-
-def parsear_santander_excel(caminho: str) -> list:
-    """
-    Layout típico do Santander:
-    Colunas: Data | Descrição | Valor | Tipo (D/C) | Saldo
-    """
-    df = pd.read_excel(caminho, engine='xlrd' if caminho.endswith('.xls') else 'openpyxl',
-                       header=None)
-
-    header_row = None
-    for i, row in df.iterrows():
-        valores = [str(v).strip().lower() for v in row.values if pd.notna(v)]
-        if 'descrição' in valores or 'descricao' in valores:
-            header_row = i
-            break
-
-    if header_row is None:
-        return parsear_excel_generico(caminho)
-
-    df.columns = df.iloc[header_row]
-    df = df.iloc[header_row + 1:].reset_index(drop=True)
-    df = df.dropna(how='all')
-
-    colunas = list(df.columns)
-    i_data  = _idx_coluna(colunas, ('data',), default=0)
-    i_desc  = _idx_coluna(colunas, ('descri', 'histór', 'lanç', 'moviment'), default=1)
-    i_valor = _idx_coluna(colunas, ('valor',), excluir=('saldo',), default=2)
-
-    transacoes = []
-    for _, row in df.iterrows():
-        try:
-            data_raw = str(row.iloc[i_data]).strip()
-            if not data_raw or data_raw == 'nan':
-                continue
-
-            descricao = str(row.iloc[i_desc]).strip()
-            valor_raw = row.iloc[i_valor]
-
-            if pd.isna(valor_raw):
-                continue
-
-            valor = abs(_parse_valor(valor_raw))
-
-            # Santander geralmente tem coluna D/C
-            tipo = 'credito'
-            for col in row.index:
-                if str(col).upper() in ['D/C', 'TIPO', 'NAT']:
-                    v = str(row[col]).strip().upper()
-                    tipo = 'debito' if v in ['D', 'DEB', 'DÉBITO'] else 'credito'
-                    break
-            else:
-                # Se não tem coluna D/C, usa o sinal do valor original
-                valor_original = _parse_valor(valor_raw)
-                tipo = 'debito' if valor_original < 0 else 'credito'
-
-            data = normalizar_data(data_raw)
-            transacoes.append({
-                'data': data,
-                'descricao': descricao,
-                'valor': valor,
-                'tipo': tipo
-            })
-
-        except (ValueError, IndexError):
-            continue
-
-    print(f"  Santander Excel: {len(transacoes)} transações extraídas")
-    return transacoes
-
-
-def parsear_bb_excel(caminho: str) -> list:
-    """Banco do Brasil — estrutura similar ao Bradesco com crédito/débito separados."""
-    return parsear_bradesco_excel(caminho)  # Layout muito similar
-
-
-def parsear_caixa_excel(caminho: str) -> list:
-    """Caixa Econômica Federal — usa parsear genérico como base."""
-    return parsear_excel_generico(caminho)
-
-
-def parsear_inter_excel(caminho: str) -> list:
-    """Banco Inter — geralmente CSV exportado como Excel."""
-    return parsear_excel_generico(caminho)
-
-
-def parsear_excel_generico(caminho: str) -> list:
-    """
-    Fallback genérico para bancos não mapeados.
-    Tenta identificar colunas por nome comum.
-    """
-    engine = 'xlrd' if caminho.endswith('.xls') else 'openpyxl'
-
-    # Tenta diferentes posições de cabeçalho
-    for skip in range(0, 15):
-        try:
-            df = pd.read_excel(caminho, engine=engine, skiprows=skip)
-            cols_lower = [str(c).lower().strip() for c in df.columns]
-
-            # Precisa ter pelo menos data e valor
-            tem_data = any('data' in c for c in cols_lower)
-            tem_valor = any('valor' in c or 'amount' in c for c in cols_lower)
-
-            if tem_data and tem_valor:
-                break
-        except Exception:
-            continue
-    else:
-        raise ValueError(f"Não foi possível identificar o layout do extrato: {caminho}")
-
-    transacoes = []
-    for _, row in df.iterrows():
-        try:
-            # Pega primeira coluna de data
-            data_col = next((c for c in df.columns if 'data' in str(c).lower()), df.columns[0])
-            desc_col = next((c for c in df.columns if any(
-                k in str(c).lower() for k in ['descri', 'histori', 'memo', 'lançamento']
-            )), df.columns[1] if len(df.columns) > 1 else df.columns[0])
-            valor_col = next((c for c in df.columns if 'valor' in str(c).lower()), None)
-
-            if valor_col is None:
-                continue
-
-            data_raw = str(row[data_col]).strip()
-            if not data_raw or data_raw == 'nan':
-                continue
-
-            descricao = str(row[desc_col]).strip()
-            valor_raw = row[valor_col]
-
-            if pd.isna(valor_raw):
-                continue
-
-            valor = _parse_valor(valor_raw)
-            data = normalizar_data(data_raw)
-
-            transacoes.append({
-                'data': data,
-                'descricao': descricao,
-                'valor': abs(valor),
-                'tipo': 'debito' if valor < 0 else 'credito'
-            })
-        except Exception:
-            continue
-
-    print(f"  Genérico Excel: {len(transacoes)} transações extraídas")
-    return transacoes
 
 
 # ─────────────────────────────────────────────
