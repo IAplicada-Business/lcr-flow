@@ -27,7 +27,8 @@ const HIST_IA = ["7","159","267","297","317","427","437","442","447","478","497"
 
 const SYSTEM_PROMPT = `Você é o classificador de documentos contábeis da LCR Contadores.
 Analise o documento enviado por um cliente e:
-1. Identifique o TIPO entre: 'extrato_bancario', 'nfe_servico', 'nfe_produto', 'planilha_financeira', 'darf', 'guia_inss_fgts', 'recibo', 'fatura', 'comprovante', 'outro'.
+1. Identifique o TIPO entre: 'extrato_bancario', 'nfe_servico', 'nfe_produto', 'planilha_financeira', 'darf', 'guia_inss_fgts', 'recibo', 'fatura_cartao', 'fatura_fornecedor', 'comprovante', 'outro'.
+   ('fatura_cartao' = extrato de cartão de crédito, GERA razão; 'fatura_fornecedor' = boleto/fatura de fornecedor ou serviço, é SUPORTE. NUNCA use só 'fatura' — escolha um dos dois.)
 
 REGRA DECISIVA — como identificar EXTRATO BANCÁRIO:
 Marque como 'extrato_bancario' SEMPRE que o documento contenha TODOS os 3 elementos:
@@ -42,14 +43,20 @@ Formatos aceitos como extrato (GERAM lançamentos — razão):
 - Extrato Itaú completo (colunas DÉBITO/CRÉDITO separadas + SALDO)
 - Extratos Bradesco, Santander, BB, Caixa, Nubank, Inter etc. no mesmo formato
 - Posição consolidada de conta corrente (com saldo início/fim)
-- Fatura/extrato de CARTÃO de crédito: cada compra/lançamento da fatura vira UM
-  lançamento (é fonte de movimento, entra na razão).
+- Fatura/extrato de CARTÃO DE CRÉDITO ('fatura_cartao'): o documento traz a LISTA
+  de compras do período. Extraia TODAS as compras individuais listadas — cada
+  compra vira UM lançamento na razão. NÃO resuma, NÃO retorne só o total da fatura
+  nem só a linha de pagamento. Se a fatura lista N compras, retorne N lançamentos.
 - Extrato de MOVIMENTO de conta de investimento (aplicações, resgates, rendimentos
   do período, com datas) — cada movimento vira lançamento.
 
 NÃO é extrato bancário (documento SUPORTE → lancamentos_sugeridos = []):
 - Comprovante único de PIX/TED/DOC (mesmo que tenha "saldo disponível" no rodapé)
 - Vários comprovantes agrupados num PDF (é 'comprovante', não extrato)
+- Fatura/boleto de FORNECEDOR ou SERVIÇO (energia, água, telefone, internet,
+  hospedagem, aluguel, mensalidade — 'fatura_fornecedor'): é conta a pagar,
+  documento SUPORTE → lancamentos_sugeridos = []. NÃO confundir com fatura de
+  cartão de crédito ('fatura_cartao'), que lista compras e GERA razão.
 - POSIÇÃO de investimentos/CDB/renda fixa/poupança (foto dos papéis, SEM
   movimentação do período → é 'planilha_financeira')
 
@@ -89,7 +96,7 @@ Regras:
 - NF-e/Recibo/Planilha/Comprovante/Fluxo de caixa/POSIÇÃO de investimento: NÃO
   gere lançamentos (o sistema os usa como documento SUPORTE para enriquecer as
   linhas do extrato). Retorne lancamentos_sugeridos = [].
-- Para documentos de SUPORTE (NF-e, recibo, DARF, fatura, comprovante), preencha
+- Para documentos de SUPORTE (NF-e, recibo, DARF, fatura de fornecedor/serviço, comprovante), preencha
   o objeto dados_suporte com: valor_total (valor total do documento, positivo),
   data_documento (AAAA-MM-DD), participante (fornecedor/tomador/favorecido) e
   numero (nº do documento). Esses campos são usados para casar o documento de
@@ -134,8 +141,15 @@ const TIPO_ALIAS: Record<string, string | null> = {
   guia: "darf",
   recibo: "recibo",
   recibo_pagamento: "recibo",
-  fatura: "fatura_cartao",
   fatura_cartao: "fatura_cartao",
+  fatura_credito: "fatura_cartao",
+  cartao_credito: "fatura_cartao",
+  cartao: "fatura_cartao",
+  // fatura de fornecedor/serviço = conta a pagar = SUPORTE (não razão)
+  fatura_fornecedor: "outros",
+  fatura_servico: "outros",
+  boleto: "outros",
+  fatura: "outros",  // 'fatura' genérica = fornecedor/serviço; cartão usa fatura_cartao
   movimento_contabil: "movimento_contabil",
   // NFs: deixa como null = preserva o tipo cadastrado no upload (nf_entrada
   // vs nf_saida depende do papel do cliente, a IA não tem como decidir).
@@ -159,7 +173,8 @@ function mapearTipoIa(tipo: string | undefined | null): string | null {
   if (k.includes("comprovante") || k.includes("transferencia")) return "outros";
   if (k.includes("darf") || k.includes("gps") || k.includes("guia")) return "darf";
   if (k.includes("recibo")) return "recibo";
-  if (k.includes("fatura")) return "fatura_cartao";
+  if (k.includes("cartao") || k.includes("cartão")) return "fatura_cartao";
+  if (k.includes("fatura") || k.includes("boleto")) return "outros";  // fatura genérica/fornecedor = suporte
   return null;
 }
 
