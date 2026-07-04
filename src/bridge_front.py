@@ -106,6 +106,9 @@ def sb_delete(tabela: str, match: dict):
     EXIGE ao menos um filtro (guarda contra apagar a tabela inteira sem querer)."""
     if not match:
         raise ValueError("sb_delete exige ao menos um filtro (match vazio apagaria tudo).")
+    if any(v is None or v == "" for v in match.values()):
+        raise ValueError(f"sb_delete: filtro com valor None/vazio recusado ({match}) — "
+                         "evita 'eq.None' (deletaria 0 linhas silenciosamente).")
     params = {k: f"eq.{v}" for k, v in match.items()}
     headers = {**SR_HEADERS, "Prefer": "return=minimal"}
     r = requests.delete(f"{URL}/rest/v1/{tabela}", headers=headers, params=params, timeout=60)
@@ -484,23 +487,26 @@ def detectar_tipo(nome: str) -> str:
     suporte. Assim some o falso-positivo (posição nomeada "Extrato Posicao" virando
     razão local) e o falso-negativo (extrato mal-nomeado virando suporte)."""
     n = nome.lower()
-    # posição/investimento → edge (mesmo com "extrato" no nome); a IA separa
-    # movimento de investimento (razão) de posição consolidada (suporte).
-    if any(k in n for k in ["posi", "consolidad", "investiment", "aplicac", "aplicaç",
-                            "renda fixa", "renda-fixa", "cdb", "fundo"]):
+    # posição/investimento → edge (a IA separa movimento de investimento=razão de
+    # posição consolidada=suporte). Termos ESPECÍFICOS p/ não colidir com palavras
+    # comuns: 'posic'/'posiç' (não 'posi', que casaria "deposito"); sem 'consolidad'
+    # (casaria "Extrato Consolidado" bancário) nem 'fundo' (casaria "Fundo de Garantia").
+    if any(k in n for k in ["posic", "posiç", "investiment", "aplicac", "aplicaç",
+                            "renda fixa", "renda-fixa", "cdb"]):
         return "planilha_financeira"
     # fatura/cartão → edge; a IA confirma como razão (fatura = fonte de movimento).
     if any(k in n for k in ["fatura", "cartao", "cartão"]):
         return "fatura_cartao"
+    # extrato ANTES de nf/darf: extrato com 'das'/'guia' no nome ("Extrato das
+    # Contas") não pode cair no grupo darf pelo 'das'. → parser local (barato).
+    if any(k in n for k in ["extrato", "cta", "conta corrente"]):
+        return "extrato"
     if any(k in n for k in ["nfe", "nf-e", "nota fiscal", "nfse", "nfs-e"]):
         return "nf_entrada"
     if any(k in n for k in ["darf", "das", "guia", "inss", "fgts", "gps"]):
         return "darf"
     if "recibo" in n:
         return "recibo"
-    # extrato de conta corrente "limpo" → parser local (extração barata).
-    if any(k in n for k in ["extrato", "cta", "conta corrente"]):
-        return "extrato"
     if n.endswith((".xlsx", ".xls", ".csv")) or "planilha" in n or "fluxo" in n:
         return "planilha_financeira"
     return "outros"
