@@ -635,36 +635,39 @@ def vincular_consultor(empresa_id: str, nome_colaborador: str):
 
 def deduplicar_razao(empresa_id: str, competencia: str, limiar: float = 0.8) -> int:
     """Remove razão de statements DUPLICADOS (mesmo extrato em 2+ formatos, ex.:
-    PDF+xlsx). Agrupa lançamentos fonte_extrato por documento; se o conjunto
-    (data,valor) de um doc está >= `limiar` contido no de outro (mesma empresa+
-    competência), é o mesmo statement → remove o redundante. Mantém: parser local
-    (xlsx/csv, determinístico) > PDF (IA); depois o mais completo; depois id menor.
-    Robusto: multi-conta (overlap baixo) não é tocado. Retorna nº de lançamentos removidos."""
-    L = sb_get("lancamentos", {"select": "documento_id,data_lancamento,valor",
+    PDF+xlsx). Agrupa lançamentos fonte_extrato por documento (chave (data,valor)
+    -> ids). Se o conjunto de chaves de um doc está >= `limiar` contido no de
+    outro, é o mesmo statement. Remoção TRANSAÇÃO-A-TRANSAÇÃO: apaga só os
+    lançamentos cuja chave TAMBÉM está no doc mantido; PRESERVA a cauda única
+    (chaves que só existem no descartado) — sem perda de transação. Mantém o
+    parser local (xlsx/csv) > PDF; depois o mais completo; depois id menor.
+    Multi-conta (overlap baixo) não é tocado. Retorna nº de lançamentos removidos."""
+    L = sb_get("lancamentos", {"select": "id,documento_id,data_lancamento,valor",
                                "empresa_id": f"eq.{empresa_id}", "competencia": f"eq.{competencia}",
                                "fonte_extrato": "eq.true", "limit": "5000"})
-    docs = {}
+    docs = {}  # doc -> {chave: [lanc_ids]}
     for l in L:
         did = l.get("documento_id")
         if not did:
             continue
-        docs.setdefault(did, set()).add(
-            ((l.get("data_lancamento") or "")[:10], round(abs(float(l.get("valor") or 0)), 2)))
+        ch = ((l.get("data_lancamento") or "")[:10], round(abs(float(l.get("valor") or 0)), 2))
+        docs.setdefault(did, {}).setdefault(ch, []).append(l["id"])
     ids = [d for d in docs if docs[d]]
     if len(ids) < 2:
         return 0
+    sets = {d: set(docs[d].keys()) for d in ids}
     nomes = {d["id"]: d.get("arquivo_nome") for d in sb_get("documentos",
              {"select": "id,arquivo_nome", "empresa_id": f"eq.{empresa_id}",
               "competencia": f"eq.{competencia}", "limit": "300"})}
     def _local(did):
         return (nomes.get(did) or "").lower().endswith((".xlsx", ".xls", ".csv"))
-    descartar = set()
+    descartar = {}  # descartado -> mantido
     for i in range(len(ids)):
         for j in range(i + 1, len(ids)):
             a, b = ids[i], ids[j]
             if a in descartar or b in descartar:
                 continue
-            sa, sb = docs[a], docs[b]
+            sa, sb = sets[a], sets[b]
             if len(sa & sb) / min(len(sa), len(sb)) >= limiar:
                 if _local(a) != _local(b):
                     manter = a if _local(a) else b
@@ -672,12 +675,22 @@ def deduplicar_razao(empresa_id: str, competencia: str, limiar: float = 0.8) -> 
                     manter = a if len(sa) > len(sb) else b
                 else:
                     manter = min(a, b)
-                descartar.add(b if manter == a else a)
+                descartar[b if manter == a else a] = manter
     removidos = 0
-    for did in descartar:
-        sb_delete("lancamentos", {"documento_id": did})
-        removidos += len(docs[did])
-        log(f"    dedup: statement duplicado removido ({(nomes.get(did) or '?')[:40]}, {len(docs[did])} lanç)")
+    for did, mant in descartar.items():
+        dup_chaves = sets[did] & sets[mant]
+        del_ids = [lid for ch in dup_chaves for lid in docs[did][ch]]
+        if not del_ids:
+            continue
+        if len(dup_chaves) == len(sets[did]):   # doc totalmente contido → 1 delete por documento_id
+            sb_delete("lancamentos", {"documento_id": did})
+        else:                                    # parcial → apaga só os dup, preserva únicos
+            for lid in del_ids:
+                sb_delete("lancamentos", {"id": lid})
+        removidos += len(del_ids)
+        unico = len(sets[did]) - len(dup_chaves)
+        log(f"    dedup: {(nomes.get(did) or '?')[:40]} — {len(del_ids)} dup removidos"
+            + (f", {unico} únicos mantidos" if unico else ""))
     return removidos
 
 
