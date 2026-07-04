@@ -521,12 +521,29 @@ Deno.serve(async (req) => {
     };
   });
 
+  // Filtro de janela de competência (±1 mês) — espelha o parser local, evita
+  // sangramento de datas de meses alheios (ex.: compras antigas na fatura, extrato
+  // multi-mês). Linha sem data válida passa (não dá p/ janelar).
+  const [cy, cm] = competencia.split("-").map(Number);
+  const compIdx = cy * 12 + (cm - 1);
+  const rowsJanela = rows.filter((r) => {
+    if (!r.data_lancamento) return true;
+    const [y, m] = r.data_lancamento.split("-").map(Number);
+    return Math.abs((y * 12 + (m - 1)) - compIdx) <= 1;
+  });
+  const foraJanela = rows.length - rowsJanela.length;
+
+  // Reprocesso idempotente: remove a razão anterior DESTE documento antes de
+  // reinserir (senão reprocessar o mesmo doc duplica a razão).
+  await admin.from("lancamentos").delete().eq("documento_id", documento_id).eq("fonte_extrato", true);
+
   let lancCriados = 0;
-  if (rows.length) {
-    const { error: insErr, count } = await admin.from("lancamentos").insert(rows, { count: "exact" });
+  if (rowsJanela.length) {
+    const { error: insErr, count } = await admin.from("lancamentos").insert(rowsJanela, { count: "exact" });
     if (insErr) return markErro(`Falha ao inserir lançamentos do extrato: ${insErr.message}`);
-    lancCriados = count ?? rows.length;
+    lancCriados = count ?? rowsJanela.length;
   }
+  if (foraJanela) console.log(`janela competência: ${foraJanela} lançamento(s) fora de ±1 mês descartado(s)`);
 
   await admin.from("documentos").update({
     tipo: tipoFinal,
