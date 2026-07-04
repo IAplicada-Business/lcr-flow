@@ -380,9 +380,14 @@ Deno.serve(async (req) => {
     await admin.from("documentos").update({ tipo: tipoFinal }).eq("id", documento_id);
   }
 
-  const competencia = (classificacao.competencia && /^\d{4}-\d{2}$/.test(classificacao.competencia))
-    ? classificacao.competencia
-    : (doc.competencia ?? `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`);
+  // Competência = a da TAREFA/documento (o fechamento é no ciclo da cobrança —
+  // ex.: extrato de abril enviado na cobrança de maio fecha em MAIO; não dá pra
+  // fechar abril em abril, o mês não fechou). NÃO usar o mês extraído do conteúdo
+  // pela IA (classificacao.competencia). Só cai no fallback se o doc não tiver.
+  const competencia = doc.competencia
+    ?? (classificacao.competencia && /^\d{4}-\d{2}$/.test(classificacao.competencia)
+        ? classificacao.competencia
+        : `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`);
 
   // ─────────────── DOC SUPORTE (NF/recibo/planilha/comprovante) ───────────────
   // Não gera lançamentos. Os dados extraídos serão usados para enriquecer as
