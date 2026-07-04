@@ -633,6 +633,54 @@ def vincular_consultor(empresa_id: str, nome_colaborador: str):
     return cid
 
 
+def deduplicar_razao(empresa_id: str, competencia: str, limiar: float = 0.8) -> int:
+    """Remove razão de statements DUPLICADOS (mesmo extrato em 2+ formatos, ex.:
+    PDF+xlsx). Agrupa lançamentos fonte_extrato por documento; se o conjunto
+    (data,valor) de um doc está >= `limiar` contido no de outro (mesma empresa+
+    competência), é o mesmo statement → remove o redundante. Mantém: parser local
+    (xlsx/csv, determinístico) > PDF (IA); depois o mais completo; depois id menor.
+    Robusto: multi-conta (overlap baixo) não é tocado. Retorna nº de lançamentos removidos."""
+    L = sb_get("lancamentos", {"select": "documento_id,data_lancamento,valor",
+                               "empresa_id": f"eq.{empresa_id}", "competencia": f"eq.{competencia}",
+                               "fonte_extrato": "eq.true", "limit": "5000"})
+    docs = {}
+    for l in L:
+        did = l.get("documento_id")
+        if not did:
+            continue
+        docs.setdefault(did, set()).add(
+            ((l.get("data_lancamento") or "")[:10], round(abs(float(l.get("valor") or 0)), 2)))
+    ids = [d for d in docs if docs[d]]
+    if len(ids) < 2:
+        return 0
+    nomes = {d["id"]: d.get("arquivo_nome") for d in sb_get("documentos",
+             {"select": "id,arquivo_nome", "empresa_id": f"eq.{empresa_id}",
+              "competencia": f"eq.{competencia}", "limit": "300"})}
+    def _local(did):
+        return (nomes.get(did) or "").lower().endswith((".xlsx", ".xls", ".csv"))
+    descartar = set()
+    for i in range(len(ids)):
+        for j in range(i + 1, len(ids)):
+            a, b = ids[i], ids[j]
+            if a in descartar or b in descartar:
+                continue
+            sa, sb = docs[a], docs[b]
+            if len(sa & sb) / min(len(sa), len(sb)) >= limiar:
+                if _local(a) != _local(b):
+                    manter = a if _local(a) else b
+                elif len(sa) != len(sb):
+                    manter = a if len(sa) > len(sb) else b
+                else:
+                    manter = min(a, b)
+                descartar.add(b if manter == a else a)
+    removidos = 0
+    for did in descartar:
+        sb_delete("lancamentos", {"documento_id": did})
+        removidos += len(docs[did])
+        log(f"    dedup: statement duplicado removido ({(nomes.get(did) or '?')[:40]}, {len(docs[did])} lanç)")
+    return removidos
+
+
 def processar_arquivos(empresa_id, competencia, arquivos, banco_cod, jwt,
                        extrato_fallback_edge=False):
     """Roteia uma lista de arquivos: extrato → motor IA; demais → edge function.
@@ -692,6 +740,17 @@ def processar_arquivos(empresa_id, competencia, arquivos, banco_cod, jwt,
     extrato_local_ok = any(e.get("documento_id") and not e.get("erro") for e in resumo["extratos"])
     if not extrato_local_ok:
         sb_update("empresas", {"id": empresa_id}, {"status": "lancamento"})
+
+    # Dedup de statements duplicados (mesmo extrato enviado em PDF+xlsx/csv na
+    # mesma cobrança) → remove a razão redundante ANTES do enriquecimento,
+    # mantendo a versão mais confiável (parser local > IA/PDF). Evita razão dobrada
+    # (SHA só dedup por arquivo; PDF e xlsx têm hashes diferentes).
+    try:
+        rem = deduplicar_razao(empresa_id, competencia)
+        if rem:
+            log(f"    dedup: {rem} lançamento(s) de statement duplicado removidos")
+    except Exception as e:
+        log(f"    AVISO: dedup falhou (não-fatal): {str(e)[:120]}")
 
     # Enriquecimento (validação): casa os documentos de suporte (NF/recibo/etc.)
     # com os lançamentos do extrato (fonte_extrato=true) por valor+data, preenchendo
