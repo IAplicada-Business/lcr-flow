@@ -367,12 +367,15 @@ Deno.serve(async (req) => {
   }
 
   const tipoMapeado = mapearTipoIa(classificacao.tipo_documento);
-  // A IA (conteúdo) é a palavra final — NÃO o nome do arquivo (doc.tipo). Gera
-  // razão quando classifica como extrato bancário OU fatura/cartão (a fatura é
-  // fonte de movimento: cada compra vira lançamento). Posição de investimento,
-  // NF, recibo, DARF, fluxo de caixa e planilha NÃO geram razão (são suporte).
-  const isExtrato = tipoMapeado === "extrato" || tipoMapeado === "fatura_cartao";
-  const tipoFinal = isExtrato ? "extrato" : (tipoMapeado && tipoMapeado !== doc.tipo ? tipoMapeado : doc.tipo);
+  // A IA (conteúdo) decide, mas mantemos doc.tipo==="extrato" como REDE DE SEGURANÇA
+  // (ex.: fallback parser-local→edge, onde o doc já chega tipado como extrato).
+  // Três conceitos distintos:
+  //  - isExtratoBancario: é o extrato do BANCO → fonte da conciliação (extrato_csv_url).
+  //  - isExtrato: gera razão (extrato bancário OU fatura/cartão OU movimento de invest.).
+  //  - tipoFinal: identidade persistida — NÃO força cartão a virar "extrato".
+  const isExtratoBancario = tipoMapeado === "extrato" || doc.tipo === "extrato";
+  const isExtrato = isExtratoBancario || tipoMapeado === "fatura_cartao";
+  const tipoFinal = isExtratoBancario ? "extrato" : (tipoMapeado ?? doc.tipo);
   if (tipoFinal !== doc.tipo) {
     await admin.from("documentos").update({ tipo: tipoFinal }).eq("id", documento_id);
   }
@@ -400,14 +403,19 @@ Deno.serve(async (req) => {
     return json(200, { ok: true, documento_suporte: true, lancamentos_gerados: 0, classificacao });
   }
 
-  // ───────────────── EXTRATO BANCÁRIO (fonte única de verdade) ──────────────
-  const concPath = await uploadExtratoBucket(competencia);
-  if (!concPath) return fail("Falha ao vincular extrato.");
+  // ─────────── RAZÃO (extrato bancário / fatura de cartão / invest.) ───────────
+  // A fonte da conciliação (extrato_csv_url) é SÓ o extrato do banco — cartão gera
+  // razão mas NÃO sobrescreve o extrato bancário na conciliação daquela competência.
+  let concPath: string | null = null;
+  if (isExtratoBancario) {
+    concPath = await uploadExtratoBucket(competencia);
+    if (!concPath) return fail("Falha ao vincular extrato.");
+  }
   await admin.from("lancamentos").delete().eq("documento_id", documento_id);
 
-  // Auto-sync banco/agência/conta pra empresa.contas_bancarias — quando a IA
-  // extraiu, garantimos que o cadastro do cliente reflete o extrato recebido.
-  try {
+  // Auto-sync banco/agência/conta → SÓ p/ extrato bancário (cartão não tem conta
+  // corrente). Quando a IA extraiu, reflete no cadastro contas_bancarias.
+  if (isExtratoBancario) try {
     const dadosStr = classificacao.dados_extraidos ?? "";
     const dadosObj: Record<string, unknown> = typeof dadosStr === "string"
       ? (() => { try { return JSON.parse(dadosStr); } catch { return {}; } })()
@@ -501,7 +509,7 @@ Deno.serve(async (req) => {
   }
 
   await admin.from("documentos").update({
-    tipo: "extrato",
+    tipo: tipoFinal,
     status: "processado",
     status_processamento: "classificado",
     classificacao_ia: classificacao,
