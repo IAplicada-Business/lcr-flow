@@ -14,7 +14,8 @@ de listar_cobrancas_api). O download final é numa URL S3 já assinada (jwt=None
 Contratos (drop-in dos passos browser):
   suficiencia(detalhe) -> {observacao, documentos:[{nome,status,numArquivos}],
                            suficiente, pendentes}
-  baixar_documentos(...) -> {"salvos": list[str], "falhas": list[{arquivo,motivo}]}
+  baixar_documentos(...) -> {"salvos": list[str], "vazios": list[{arquivo,caminho,motivo}],
+                             "falhas": list[{arquivo,motivo,tipo}]}  (tipo: corrompido|download)
       salva os arquivos OK e sinaliza os que falharam (após retry) — o caller
       marca a tarefa INCOMPLETA em vez de perder documento em silêncio.
 """
@@ -161,12 +162,29 @@ def _classificar_download(r: requests.Response, file_name: str):
             return "salva", ""
         return "falha", "HTML inesperado (página de erro?)"
     if not corpo:
-        return "falha", "resposta vazia (0b)"
-    # Arquivo pequeno mas NÃO vazio é documento legítimo — ex.: extrato do mês SEM
-    # movimento (Nubank exporta só o cabeçalho 'Data,Valor,...'), recibo curto. NÃO
-    # é falha de download (o erro real da S3 já foi pego por <Error>/HTML acima); o
-    # parser trata como 0 transações. Antes, o corte <100b barrava esses e a tarefa
-    # ficava em loop de erro (ex.: LS4C, CSV Nubank vazio de 37b).
+        return "falha", "resposta vazia (0b) — download não retornou conteúdo"
+
+    # Distinção explícita (o erro real da S3 já foi pego por <Error>/HTML acima):
+    #   'vazia'      = formato válido mas SEM dados → extrato do mês sem movimento
+    #                  (ex.: Nubank exporta só o cabeçalho 'Data,Valor,...'). Salva e
+    #                  sinaliza; NÃO é erro (o parser trata como 0 transações).
+    #   'corrompida' = binário sem formato reconhecível (não abre) → recobrar do cliente.
+    #   'salva'      = documento normal.
+    try:
+        texto = corpo.decode("utf-8")
+    except UnicodeDecodeError:
+        texto = None
+    if texto is not None:  # é texto (CSV/TXT/XML)
+        linhas = [l for l in texto.splitlines() if l.strip()]
+        if len(linhas) <= 1:
+            return "vazia", f"extrato sem movimento (arquivo só com cabeçalho, {len(corpo)}b)"
+        return "salva", ""
+    # binário: exige magic conhecido, senão é corrupção real
+    h = corpo[:8]
+    conhecido = (h[:4] == b"%PDF" or h[:4] == b"PK\x03\x04" or h[:4] == b"\xd0\xcf\x11\xe0"
+                 or h[:3] == b"\xff\xd8\xff" or h[:8] == b"\x89PNG\r\n\x1a\n")
+    if not conhecido:
+        return "corrompida", f"arquivo ilegível (binário sem formato reconhecível, {len(corpo)}b) — recobrar do cliente"
     return "salva", ""
 
 
@@ -189,45 +207,59 @@ def _baixar_arquivo(task_id, doc_id, customer_id, file_id, file_name, jwt, tenta
                 r2 = _req("GET", url, jwt=None)  # URL já assinada → sem Authorization
                 cls, m = _classificar_download(r2, file_name)
                 if cls == "salva":
-                    return r2.content, None
-                motivo = m
+                    return r2.content, "salva", ""
+                if cls == "vazia":        # conteúdo real, só sem dados → salva e sinaliza, sem retry
+                    return r2.content, "vazia", m
+                if cls == "corrompida":   # retry não conserta corrupção → não retenta
+                    return None, "corrompida", m
+                motivo = m                # 'falha' (transitório: assinatura expirada etc.) → retenta
         except RuntimeError as e:
             if "SESSAO_EXPIRADA" in str(e):
                 raise
             motivo = str(e)[:120]
         if i < tentativas - 1:
             time.sleep(1.5)  # janela p/ a URL nova; backoff leve
-    return None, motivo
+    return None, "falha", motivo
 
 
 def baixar_documentos(detalhe: dict, destino: str, jwt: str):
     """Baixa via REST todos os arquivos de documentos NÃO desconsiderados.
     Cada arquivo: POST (URL S3 assinada) + GET (bytes), com retry em falha de
     download (_baixar_arquivo). Salva os que vieram OK e coleta os que falharam.
-    Retorna {"salvos": [caminhos], "falhas": [{arquivo, motivo}]}. Assim o caller
-    processa os OK e marca a tarefa como INCOMPLETA quando há falhas — nunca perde
-    documento em silêncio.
+    Retorna {"salvos": [caminhos], "vazios": [{arquivo, caminho, motivo}],
+    "falhas": [{arquivo, motivo, tipo}]}. 'vazios' = baixados OK mas SEM dados
+    (extrato do mês sem movimento) — o caller processa e SINALIZA. 'falhas' com
+    tipo='corrompido' (arquivo ilegível, recobrar) ou 'download' (erro S3 real).
+    Assim o caller distingue os 3 casos e nunca perde documento em silêncio.
     Propaga SESSAO_EXPIRADA (aborta a tarefa p/ relogin no orquestrador)."""
     Path(destino).mkdir(parents=True, exist_ok=True)
     task_id = detalhe.get("_id")
     customer_id = _customer_id(detalhe)
-    salvos, falhas, usados = [], [], set()
+    salvos, vazios, falhas, usados = [], [], [], set()
 
     for d in _requested_documents(detalhe):
         if d.get("disconsidered"):
             continue
         for f in (d.get("files") or []):
             file_name = f.get("file_name") or f.get("_id") or "arquivo"
-            conteudo, motivo = _baixar_arquivo(
+            conteudo, categoria, motivo = _baixar_arquivo(
                 task_id, d.get("_id"), customer_id, f.get("_id"), file_name, jwt)
-            if conteudo is None:
+            if categoria == "corrompida":
+                log(f"    CORROMPIDO: {file_name}: {motivo}")
+                falhas.append({"arquivo": file_name, "motivo": motivo, "tipo": "corrompido"})
+                continue
+            if conteudo is None:  # 'falha' de download (transitório esgotou o retry)
                 log(f"    FALHA: {file_name}: {motivo}")
-                falhas.append({"arquivo": file_name, "motivo": motivo})
+                falhas.append({"arquivo": file_name, "motivo": motivo, "tipo": "download"})
                 continue
             nome = _nome_unico(file_name, usados)
             caminho = Path(destino) / nome
             caminho.write_bytes(conteudo)
-            salvos.append(str(caminho))
-            log(f"    OK baixado: {nome} ({len(conteudo)}b)")
+            if categoria == "vazia":
+                vazios.append({"arquivo": nome, "caminho": str(caminho), "motivo": motivo})
+                log(f"    VAZIO (sem movimento): {nome} ({len(conteudo)}b) — {motivo}")
+            else:
+                salvos.append(str(caminho))
+                log(f"    OK baixado: {nome} ({len(conteudo)}b)")
             time.sleep(0.3)  # espalha a carga na API do Gestta
-    return {"salvos": salvos, "falhas": falhas}
+    return {"salvos": salvos, "vazios": vazios, "falhas": falhas}

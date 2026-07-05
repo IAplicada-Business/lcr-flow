@@ -380,6 +380,30 @@ def processar_tarefa(t: dict, competencia: str, comp_g: str, jwt: str) -> dict:
 
 
 # ── Processa uma tarefa via API REST (sem browser) — Etapas 1–4 ───────────────
+def _sinalizar_documento(empresa_id: str, competencia: str, arquivo_nome: str, aviso: str,
+                         status_proc: str = None):
+    """Grava um aviso EXPLÍCITO no documento (aparece na tela de Revisão do front,
+    em classificacao_ia.observacoes). Usado p/ 'extrato sem movimento' etc. — para
+    o contador não confundir 'veio vazio' com 'faltou processar'. Best-effort."""
+    try:
+        docs = bf.sb_get("documentos", {"select": "id,classificacao_ia",
+                                        "empresa_id": f"eq.{empresa_id}",
+                                        "competencia": f"eq.{competencia}",
+                                        "arquivo_nome": f"eq.{arquivo_nome}", "limit": "1"})
+        if not docs:
+            return
+        ci = docs[0].get("classificacao_ia")
+        ci = ci if isinstance(ci, dict) else {}
+        obs = (ci.get("observacoes") or "").strip()
+        ci["observacoes"] = (obs + " | " if obs else "") + aviso
+        patch = {"classificacao_ia": ci}
+        if status_proc:
+            patch["status_processamento"] = status_proc
+        bf.sb_update("documentos", {"id": docs[0]["id"]}, patch)
+    except Exception as e:
+        log(f"    (aviso não gravado no doc {arquivo_nome}: {str(e)[:80]})")
+
+
 def processar_tarefa_api(t: dict, competencia: str, comp_g: str, jwt: str, jwt_gestta: str,
                          ignorar_suficiencia: bool = False) -> dict:
     """Igual a processar_tarefa, mas troca os 2 passos de browser por REST:
@@ -436,21 +460,32 @@ def processar_tarefa_api(t: dict, competencia: str, comp_g: str, jwt: str, jwt_g
     destino = str(ROOT / "outputs" / "gestta" / f"{empresa_id}_{comp_mov}")
     try:
         dl = api_docs.baixar_documentos(detalhe, destino, jwt_gestta)
-        arquivos, falhas_dl = dl["salvos"], dl["falhas"]
+        arquivos, vazios_dl, falhas_dl = dl["salvos"], dl.get("vazios", []), dl["falhas"]
     except Exception as e:
         return {**base, "status": "erro", "motivo": f"download(api): {str(e)[:600]}"}
-    if not arquivos:
-        # Nada salvo. Se houve falhas de download, é erro (reprocessar), não "sem docs".
+    # Extratos VAZIOS (sem movimento) também entram no processamento (0 lanç) e são
+    # sinalizados depois — não travam a tarefa (decisão: processa + sinaliza).
+    processaveis = arquivos + [v["caminho"] for v in vazios_dl]
+    if not processaveis:
+        # Nada processável. Se houve falha real (corrompido/download), é erro; senão sem docs.
         if falhas_dl:
-            motivo = f"download(api): {len(falhas_dl)} arquivo(s) falharam (ex.: {falhas_dl[0].get('motivo','')[:80]})"
+            f0 = falhas_dl[0]
+            motivo = (f"download(api): {len(falhas_dl)} arquivo(s) com problema "
+                      f"(ex.: {f0.get('tipo','?')} — {f0.get('motivo','')[:80]})")
             return {**base, "status": "erro", "motivo": motivo, "falhas_download": falhas_dl}
         return {**base, "status": "sem_documentos", "motivo": "API: 0 arquivos baixáveis"}
 
     try:
         # Backfill: extrato que o parser local não ler cai p/ a edge (IA lê layouts diversos).
-        resumo = bf.processar_arquivos(empresa_id, comp_mov, arquivos, banco, jwt, extrato_fallback_edge=True)
+        resumo = bf.processar_arquivos(empresa_id, comp_mov, processaveis, banco, jwt, extrato_fallback_edge=True)
     except Exception as e:
         return {**base, "status": "erro", "motivo": f"etapa4(api): {str(e)[:600]}"}
+
+    # Sinaliza os extratos vazios: aviso EXPLÍCITO no documento (tela de Revisão) —
+    # "sem movimento no período" — para não parecer que faltou processar.
+    for v in vazios_dl:
+        _sinalizar_documento(empresa_id, comp_mov, v["arquivo"], f"AVISO: {v['motivo']}")
+        log(f"    sinalizado extrato vazio: {v['arquivo']} — {v['motivo']}")
 
     if resp:
         try:
@@ -462,8 +497,12 @@ def processar_tarefa_api(t: dict, competencia: str, comp_g: str, jwt: str, jwt_g
     lanc = sum(e.get("lancamentos", 0) for e in extratos)
     resultado = {**base, "banco": banco, "consultor": resp,
                  "lancamentos_extrato": lanc, "outros_docs": len(resumo.get("outros", []))}
-    # Parte dos arquivos falhou no download → tarefa INCOMPLETA (não vira 'processada'
-    # no ledger; os OK ficam salvos, o restante é sinalizado p/ reprocesso/revisão).
+    # Extratos vazios (sem movimento): tarefa segue 'processada', mas registra o
+    # aviso no resultado (visível no monitor) além do doc (tela de Revisão).
+    if vazios_dl:
+        resultado["extratos_vazios"] = [{"arquivo": v["arquivo"], "motivo": v["motivo"]} for v in vazios_dl]
+    # Falha real (corrompido/download) → tarefa INCOMPLETA (não vira 'processada' no
+    # ledger; os OK ficam salvos, o restante é sinalizado p/ reprocesso/revisão).
     if falhas_dl:
         resultado["status"] = "incompleta"
         resultado["falhas_download"] = falhas_dl
