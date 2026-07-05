@@ -21,6 +21,9 @@ planilhas/
 # Chrome profile (local)
 profiles/
 
+# Supabase CLI (artefato de link do projeto; não faz parte deste repo)
+supabase/
+
 # Secrets
 .env
 *.env.local
