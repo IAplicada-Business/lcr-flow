@@ -160,8 +160,13 @@ def _classificar_download(r: requests.Response, file_name: str):
         if ext in ("xls", "xlsx", "html", "htm"):
             return "salva", ""
         return "falha", "HTML inesperado (página de erro?)"
-    if len(corpo) < 100:
-        return "falha", f"resposta muito pequena ({len(corpo)}b)"
+    if not corpo:
+        return "falha", "resposta vazia (0b)"
+    # Arquivo pequeno mas NÃO vazio é documento legítimo — ex.: extrato do mês SEM
+    # movimento (Nubank exporta só o cabeçalho 'Data,Valor,...'), recibo curto. NÃO
+    # é falha de download (o erro real da S3 já foi pego por <Error>/HTML acima); o
+    # parser trata como 0 transações. Antes, o corte <100b barrava esses e a tarefa
+    # ficava em loop de erro (ex.: LS4C, CSV Nubank vazio de 37b).
     return "salva", ""
 
 
