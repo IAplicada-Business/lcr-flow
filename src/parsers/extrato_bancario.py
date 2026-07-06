@@ -106,6 +106,22 @@ def _so_digitos(s: str) -> str:
     return re.sub(r"\D", "", s or "")
 
 
+def _norm_conta(raw: str) -> str:
+    """Conta canônica p/ dedup: só dígitos, SEM zeros à esquerda e SEM o dígito
+    verificador. O DV é o grupo de 1-2 dígitos após um separador (-./espaço) no
+    fim (ex.: '33033-2' e '0033033-2' → '33033'). Sem separador, mantém como veio
+    (não dá p/ saber se o último dígito é DV). Isto ALINHA o parser local — que lê
+    o cabeçalho e enxerga o traço do DV — com o edge (conta vinda da IA, que às
+    vezes já solta o DV): sem normalizar, '330332' (local) ≠ '33033' (IA) e o dedup
+    cross-engine não casava. Retorna None se vazio."""
+    s = raw or ""
+    m = re.search(r"[-./ ](\d{1,2})\s*$", s)
+    dig = _so_digitos(s)
+    if m and len(dig) > len(m.group(1)):
+        dig = dig[: -len(m.group(1))]
+    return dig.lstrip("0") or None
+
+
 def _primeiro_match(pats, texto):
     for p in pats:
         m = re.search(p, texto, re.IGNORECASE)
@@ -140,7 +156,7 @@ def extrair_identidade(caminho: str, banco: str = None) -> dict:
     ag = _primeiro_match(_PATS_AGENCIA, texto)
     ct = _primeiro_match(_PATS_CONTA, texto)
     ag = _so_digitos(ag).lstrip("0") or None if ag else None
-    ct = _so_digitos(ct).lstrip("0") or None if ct else None
+    ct = _norm_conta(ct) if ct else None
     return {
         "banco": ((banco or detectar_banco(caminho)) or "").lower() or None,
         "agencia": ag,
