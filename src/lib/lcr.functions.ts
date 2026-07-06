@@ -10,6 +10,20 @@ async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
   if (data?.perfil !== "admin") throw new Error("Apenas administradores.");
 }
 
+// Normaliza a descrição p/ virar chave do aprendizado de participante: maiúsculas,
+// sem acento, sem dígitos/pontuação, espaços colapsados. Ex.: "PIX 12/05 ANDRESSA
+// SILVA 998" -> "PIX ANDRESSA SILVA". DEVE ser idêntica à versão TS espelhada na
+// edge enriquecer-extrato (senão o que foi aprendido não casa na aplicação).
+export function normalizarDescricao(s: string | null | undefined): string {
+  return (s ?? "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toUpperCase()
+    .replace(/[0-9]+/g, " ")
+    .replace(/[^A-Z ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 const competenciaInput = z.object({ competencia: z.string().optional() }).optional();
 
 export const getDashboardStats = createServerFn({ method: "GET" })
@@ -783,7 +797,7 @@ export const listLancamentosConciliacao = createServerFn({ method: "GET" })
     const { data: empresa } = await context.supabase.from("empresas").select("id, razao_social, nome_fantasia").eq("id", data.empresa_id).maybeSingle();
     const { data: rows, error } = await context.supabase
       .from("lancamentos")
-      .select("id, data_lancamento, valor, descricao, documento_numero, part_deb, part_cred, natureza_movimento, conciliado, confidence, status, fonte_extrato, enriquecido, participante, documento_suporte_id, conta:conta_id(codigo, descricao, tipo, sci_apelido, sci_historico_padrao), historico:historico_id(codigo, descricao, sci_apelido)")
+      .select("id, data_lancamento, valor, descricao, documento_numero, part_deb, part_cred, part_aprendido, natureza_movimento, conciliado, confidence, status, fonte_extrato, enriquecido, participante, documento_suporte_id, conta:conta_id(codigo, descricao, tipo, sci_apelido, sci_historico_padrao), historico:historico_id(codigo, descricao, sci_apelido)")
       .eq("empresa_id", data.empresa_id)
       .eq("competencia", data.competencia)
       .not("valor", "is", null)
@@ -958,8 +972,8 @@ export const editarLancamento = createServerFn({ method: "POST" })
     descricao: z.string().max(200).optional(),
     conta_codigo: z.string().max(40).optional(),
     documento_numero: z.string().max(80).nullable().optional(),
-    part_deb: z.string().max(40).nullable().optional(),
-    part_cred: z.string().max(40).nullable().optional(),
+    part_deb: z.string().max(120).nullable().optional(),
+    part_cred: z.string().max(120).nullable().optional(),
   }).parse(d))
   .handler(async ({ context, data }) => {
     const patch: Record<string, unknown> = {};
@@ -988,6 +1002,54 @@ export const editarLancamento = createServerFn({ method: "POST" })
     if (Object.keys(patch).length === 0) return { ok: true };
     const { error } = await context.supabase.from("lancamentos").update(patch as never).eq("id", data.id);
     if (error) throw new Error(error.message);
+
+    // Aprendizado de participante (Mari): ao preencher part_deb/part_cred
+    // manualmente, memoriza o padrão (descrição normalizada + conta + partes)
+    // por empresa p/ o enriquecer-extrato autopreencher no futuro. Edição por
+    // cima re-aprende (valor novo prevalece + incrementa frequência). Não-fatal:
+    // um erro aqui nunca deve derrubar a edição do lançamento.
+    if ((data.part_deb != null && data.part_deb !== "") || (data.part_cred != null && data.part_cred !== "")) {
+      try {
+        const { data: lanc } = await context.supabase
+          .from("lancamentos")
+          .select("empresa_id, descricao, conta:conta_id(codigo)")
+          .eq("id", data.id)
+          .maybeSingle();
+        const row = lanc as { empresa_id?: string | null; descricao?: string | null; conta?: { codigo?: string | null } | null } | null;
+        const padrao = normalizarDescricao(data.descricao ?? row?.descricao ?? "");
+        if (row?.empresa_id && padrao) {
+          const contaCodigo = data.conta_codigo ?? row.conta?.codigo ?? null;
+          const agora = new Date().toISOString();
+          const { data: existente } = await context.supabase
+            .from("aprendizado_participante")
+            .select("id, frequencia")
+            .eq("empresa_id", row.empresa_id)
+            .eq("padrao_descricao", padrao)
+            .maybeSingle();
+          const ap = existente as { id: string; frequencia: number | null } | null;
+          if (ap) {
+            await context.supabase.from("aprendizado_participante").update({
+              conta_codigo: contaCodigo,
+              part_deb: data.part_deb ?? null,
+              part_cred: data.part_cred ?? null,
+              frequencia: (ap.frequencia ?? 1) + 1,
+              ultima_ocorrencia: agora,
+            } as never).eq("id", ap.id);
+          } else {
+            await context.supabase.from("aprendizado_participante").insert({
+              empresa_id: row.empresa_id,
+              padrao_descricao: padrao,
+              conta_codigo: contaCodigo,
+              part_deb: data.part_deb ?? null,
+              part_cred: data.part_cred ?? null,
+              frequencia: 1,
+              ultima_ocorrencia: agora,
+              criado_por: context.userId ?? null,
+            } as never);
+          }
+        }
+      } catch { /* aprendizado é best-effort; não bloqueia a edição */ }
+    }
     return { ok: true };
   });
 

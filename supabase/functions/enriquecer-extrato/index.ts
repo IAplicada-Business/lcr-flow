@@ -56,6 +56,19 @@ function diffDias(a: string, b: string): number {
   return Math.round(Math.abs(t1 - t2) / 86400000);
 }
 
+// Chave do aprendizado de participante. DEVE ser idêntica à normalizarDescricao
+// do front (src/lib/lcr.functions.ts) — se divergir, o que foi aprendido lá não
+// casa aqui. "PIX 12/05 ANDRESSA SILVA 998" -> "PIX ANDRESSA SILVA".
+function normalizarDescricao(s: string | null | undefined): string {
+  return (s ?? "")
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toUpperCase()
+    .replace(/[0-9]+/g, " ")
+    .replace(/[^A-Z ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
   if (req.method !== "POST") return fail("Método não permitido");
@@ -72,7 +85,7 @@ Deno.serve(async (req) => {
 
   const [{ data: lancs }, { data: docs }] = await Promise.all([
     admin.from("lancamentos")
-      .select("id, valor, data_lancamento, descricao, enriquecido, fonte_extrato")
+      .select("id, valor, data_lancamento, descricao, enriquecido, fonte_extrato, part_deb, part_cred, conta_id")
       .eq("empresa_id", body.empresa_id)
       .eq("competencia", competencia)
       .eq("fonte_extrato", true),
@@ -83,7 +96,7 @@ Deno.serve(async (req) => {
       .neq("tipo", "extrato"),
   ]);
 
-  type Lanc = { id: string; valor: number | null; data_lancamento: string | null; descricao: string | null; enriquecido: boolean };
+  type Lanc = { id: string; valor: number | null; data_lancamento: string | null; descricao: string | null; enriquecido: boolean; part_deb: string | null; part_cred: string | null; conta_id: string | null };
   type Doc = { id: string; tipo: string; arquivo_nome: string | null; classificacao_ia: Record<string, unknown> | null; dados_extraidos: Record<string, unknown> | null };
 
   const lancsTyped = (lancs ?? []) as Lanc[];
@@ -135,12 +148,50 @@ Deno.serve(async (req) => {
     }
   }
 
-  const semSuporte = lancsTyped.filter((l) => !l.enriquecido && !lancsTyped.find((x) => x.id === l.id && x.enriquecido)).length;
+  // ── Aprendizado de participante (Mari) ──────────────────────────────────
+  // Antes de deixar part_deb/part_cred em branco, aplica o que foi aprendido
+  // p/ esta empresa (mesma descrição normalizada). Marca part_aprendido=true
+  // (badge "aprendido" no front). Independe do match por documento suporte.
+  const { data: aprendRows } = await admin
+    .from("aprendizado_participante")
+    .select("padrao_descricao, conta_codigo, part_deb, part_cred")
+    .eq("empresa_id", body.empresa_id);
+  type Aprend = { padrao_descricao: string; conta_codigo: string | null; part_deb: string | null; part_cred: string | null };
+  const mapaAprend = new Map<string, Aprend>();
+  for (const a of (aprendRows ?? []) as Aprend[]) {
+    if (a.padrao_descricao) mapaAprend.set(a.padrao_descricao, a);
+  }
+
+  let aprendidosAplicados = 0;
+  if (mapaAprend.size) {
+    for (const l of lancsTyped) {
+      const jaTem = (l.part_deb && l.part_deb.trim()) || (l.part_cred && l.part_cred.trim());
+      if (jaTem) continue;
+      const padrao = normalizarDescricao(l.descricao);
+      if (!padrao) continue;
+      const ap = mapaAprend.get(padrao);
+      if (!ap || (!ap.part_deb && !ap.part_cred)) continue;
+      const patch: Record<string, unknown> = { part_aprendido: true };
+      if (ap.part_deb) patch.part_deb = ap.part_deb.slice(0, 200);
+      if (ap.part_cred) patch.part_cred = ap.part_cred.slice(0, 200);
+      // conta só se o lançamento estiver SEM conta — não sobrescreve a classificação da IA.
+      if (!l.conta_id && ap.conta_codigo) {
+        const { data: contas } = await admin.from("plano_contas").select("id, empresa_id, codigo").eq("codigo", ap.conta_codigo);
+        const lista = (contas ?? []) as { id: string; empresa_id: string | null; codigo: string }[];
+        const conta = lista.find((c) => c.empresa_id === body.empresa_id) ?? lista.find((c) => c.empresa_id === null) ?? lista[0];
+        if (conta) patch.conta_id = conta.id;
+      }
+      const { error } = await admin.from("lancamentos").update(patch).eq("id", l.id);
+      if (!error) aprendidosAplicados++;
+    }
+  }
+
   return json(200, {
     ok: true,
     competencia,
     total_lancamentos: lancsTyped.length,
     enriquecidos,
+    aprendidos: aprendidosAplicados,
     sem_suporte: Math.max(0, lancsTyped.length - enriquecidos),
     docs_suporte_disponiveis: docsProntos.length,
   });

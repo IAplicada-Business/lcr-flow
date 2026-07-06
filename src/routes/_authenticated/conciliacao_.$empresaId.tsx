@@ -75,6 +75,9 @@ type LancConc = {
   fonte_extrato?: boolean | null;
   enriquecido?: boolean | null;
   participante?: string | null;
+  part_deb?: string | null;
+  part_cred?: string | null;
+  part_aprendido?: boolean | null;
   documento_numero?: string | null;
   documento_suporte_id?: string | null;
   conta: { codigo: string; descricao: string; tipo: string | null } | null;
@@ -247,7 +250,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
   // seleção para pareamento manual + edição/inclusão de lançamento
   const [selRazao, setSelRazao] = useState<number | null>(null);
   const [selExtrato, setSelExtrato] = useState<number | null>(null);
-  const [edit, setEdit] = useState<{ id: string; data: string; valor: string; descricao: string; conta_codigo: string } | null>(null);
+  const [edit, setEdit] = useState<{ id: string; data: string; valor: string; descricao: string; conta_codigo: string; part_deb: string; part_cred: string } | null>(null);
   const [novo, setNovo] = useState<{ data: string; valor: string; descricao: string; conta_codigo: string } | null>(null);
   const [acting, setActing] = useState(false);
 
@@ -258,6 +261,8 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
       valor: l.valor != null ? String(Math.abs(l.valor)) : "",
       descricao: l.descricao ?? "",
       conta_codigo: l.conta?.codigo ?? "",
+      part_deb: l.part_deb ?? "",
+      part_cred: l.part_cred ?? "",
     });
   }
 
@@ -329,6 +334,8 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
         valor: edit.valor ? Number(edit.valor.replace(",", ".")) : undefined,
         descricao: edit.descricao || undefined,
         conta_codigo: edit.conta_codigo || undefined,
+        part_deb: edit.part_deb.trim() || null,
+        part_cred: edit.part_cred.trim() || null,
       } });
       setEdit(null);
       await qc.invalidateQueries({ queryKey: ["lanc-conc"] });
@@ -544,7 +551,15 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
                         {l.confidence != null && l.confidence < CONF_MIN_REVISAO && <span className="ml-1 text-[10px] text-amber-700">({Math.round(l.confidence * 100)}%)</span>}
                       </TableCell>
                       <TableCell className="text-xs">
-                        {l.participante ? <div className="font-medium text-foreground truncate max-w-[12rem]" title={l.participante}>{l.participante}</div> : <span className="text-muted-foreground">—</span>}
+                        {(() => {
+                          const p = l.part_deb || l.part_cred || l.participante;
+                          return p ? (
+                            <div className="flex items-center gap-1 max-w-[12rem]">
+                              <span className="truncate font-medium text-foreground" title={p}>{p}</span>
+                              {l.part_aprendido && <span className="shrink-0 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-medium text-sky-700" title="Preenchido pelo aprendizado de participante — confira e edite se necessário">aprendido</span>}
+                            </div>
+                          ) : <span className="text-muted-foreground">—</span>;
+                        })()}
                         {l.documento_numero ? <div className="font-mono text-[10px] text-muted-foreground">NF {l.documento_numero}</div> : null}
                       </TableCell>
                       <TableCell className="text-right font-mono text-sm">{l.valor == null ? "—" : brl(l.valor)}</TableCell>
@@ -655,7 +670,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
                 <DivergCol
                   titulo="Na razão, sem par no extrato" linhas={resultado.divergencias_razao}
                   sel={selRazao} onSel={(i) => setSelRazao(selRazao === i ? null : i)}
-                  onEdit={(l) => setEdit({ id: l.id ?? "", data: l.data ?? "", valor: String(l.valor ?? ""), descricao: l.descricao ?? "", conta_codigo: "" })}
+                  onEdit={(l) => setEdit({ id: l.id ?? "", data: l.data ?? "", valor: String(l.valor ?? ""), descricao: l.descricao ?? "", conta_codigo: "", part_deb: "", part_cred: "" })}
                   onDelete={(l) => l.id && excluirLancamento(l.id, l.descricao)}
                   acting={acting}
                 />
@@ -713,6 +728,14 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
                 <div className="space-y-1.5"><Label>Data (AAAA-MM-DD)</Label><Input value={edit.data} onChange={(e) => setEdit({ ...edit, data: e.target.value })} placeholder="2026-06-30" /></div>
                 <div className="space-y-1.5"><Label>Valor</Label><Input value={edit.valor} onChange={(e) => setEdit({ ...edit, valor: e.target.value })} placeholder="1234.56" /></div>
               </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5"><Label>Participante (débito)</Label><Input value={edit.part_deb} onChange={(e) => setEdit({ ...edit, part_deb: e.target.value })} placeholder="Ex: Andressa Silva" /></div>
+                <div className="space-y-1.5"><Label>Participante (crédito)</Label><Input value={edit.part_cred} onChange={(e) => setEdit({ ...edit, part_cred: e.target.value })} placeholder="Ex: Andressa Silva" /></div>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                Participante em branco é normal — só contas que exigem preenchem. Ao preencher, o sistema
+                <strong> aprende por cliente</strong>: transações futuras com a mesma descrição são autopreenchidas.
+              </p>
             </div>
           )}
           <DialogFooter>

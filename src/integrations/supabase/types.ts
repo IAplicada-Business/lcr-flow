@@ -14,6 +14,53 @@ export type Database = {
   }
   public: {
     Tables: {
+      aprendizado_participante: {
+        Row: {
+          conta_codigo: string | null
+          criado_em: string
+          criado_por: string | null
+          empresa_id: string
+          frequencia: number
+          id: string
+          padrao_descricao: string
+          part_cred: string | null
+          part_deb: string | null
+          ultima_ocorrencia: string
+        }
+        Insert: {
+          conta_codigo?: string | null
+          criado_em?: string
+          criado_por?: string | null
+          empresa_id: string
+          frequencia?: number
+          id?: string
+          padrao_descricao: string
+          part_cred?: string | null
+          part_deb?: string | null
+          ultima_ocorrencia?: string
+        }
+        Update: {
+          conta_codigo?: string | null
+          criado_em?: string
+          criado_por?: string | null
+          empresa_id?: string
+          frequencia?: number
+          id?: string
+          padrao_descricao?: string
+          part_cred?: string | null
+          part_deb?: string | null
+          ultima_ocorrencia?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "aprendizado_participante_empresa_id_fkey"
+            columns: ["empresa_id"]
+            isOneToOne: false
+            referencedRelation: "empresas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       audit_log: {
         Row: {
           acao: string
@@ -1058,6 +1105,7 @@ export type Database = {
           importado_em: string | null
           linhas_count: number | null
           natureza_movimento: string | null
+          part_aprendido: boolean
           part_cred: string | null
           part_deb: string | null
           participante: string | null
@@ -1090,6 +1138,7 @@ export type Database = {
           importado_em?: string | null
           linhas_count?: number | null
           natureza_movimento?: string | null
+          part_aprendido?: boolean
           part_cred?: string | null
           part_deb?: string | null
           participante?: string | null
@@ -1122,6 +1171,7 @@ export type Database = {
           importado_em?: string | null
           linhas_count?: number | null
           natureza_movimento?: string | null
+          part_aprendido?: boolean
           part_cred?: string | null
           part_deb?: string | null
           participante?: string | null
