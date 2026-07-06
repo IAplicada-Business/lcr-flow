@@ -13,12 +13,20 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogT
 import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Trash2, Search, Pencil, ChevronLeft, ChevronRight } from "lucide-react";
 import { StatusPill, variantFor } from "@/components/status-pill";
-import { listEmpresasPaginadas, getEmpresasResumo, listConsultores, createEmpresa, updateEmpresa, deleteEmpresa } from "@/lib/lcr.functions";
-import { REGIME_LABEL, EMPRESA_STATUS_LABEL, DOC_TIPO_LABEL, formatCNPJ } from "@/lib/format";
+import { listEmpresasPaginadas, getEmpresasResumo, listConsultores, createEmpresa, updateEmpresa, deleteEmpresa, listEmpresasQualidade } from "@/lib/lcr.functions";
+import { REGIME_LABEL, EMPRESA_STATUS_LABEL, DOC_TIPO_LABEL, formatCNPJ, formatCompetencia, competenciaAtual } from "@/lib/format";
 import { toast } from "sonner";
 import { requireAcesso } from "@/lib/guard";
+import { cn } from "@/lib/utils";
+
+type FaixaQualidade = "alta" | "media" | "baixa";
+type ClientesSearch = { filtro?: "qualidade"; faixa?: FaixaQualidade };
 
 export const Route = createFileRoute("/_authenticated/clientes")({
+  validateSearch: (s: Record<string, unknown>): ClientesSearch => ({
+    filtro: s.filtro === "qualidade" ? "qualidade" : undefined,
+    faixa: (["alta", "media", "baixa"] as const).includes(s.faixa as FaixaQualidade) ? (s.faixa as FaixaQualidade) : undefined,
+  }),
   beforeLoad: ({ context }) => requireAcesso(context.queryClient, "clientes", "/clientes"),
   head: () => ({ meta: [{ title: "Clientes — LCR Contábil" }] }),
   loader: async ({ context }) => {
@@ -42,6 +50,12 @@ function useDebouncedValue<T>(value: T, ms = 300): T {
 }
 
 function ClientesPage() {
+  const search = Route.useSearch();
+  if (search.filtro === "qualidade") return <QualidadeCarteira faixaInicial={search.faixa} />;
+  return <ListaClientes />;
+}
+
+function ListaClientes() {
   const qc = useQueryClient();
   const { data: resumoServer } = useSuspenseQuery({ queryKey: ["empresas-resumo"], queryFn: () => getEmpresasResumo() });
   const { data: consultores } = useSuspenseQuery({ queryKey: ["consultores"], queryFn: () => listConsultores() });
@@ -180,6 +194,92 @@ function ClientesPage() {
             </Button>
           </div>
         </div>
+      </Card>
+    </>
+  );
+}
+
+const FAIXA_META: Record<FaixaQualidade, { badge: string }> = {
+  alta: { badge: "bg-primary/10 text-primary" },
+  media: { badge: "bg-amber-100 text-amber-700" },
+  baixa: { badge: "bg-destructive/10 text-destructive" },
+};
+
+// Visão "Qualidade da carteira" (/clientes?filtro=qualidade): empresas anotadas
+// com a confiança média da IA no mês, filtráveis por faixa. Serve p/ o time
+// separar semi-automático (≥80%) de revisão parcial/total (Cleiton).
+function QualidadeCarteira({ faixaInicial }: { faixaInicial?: FaixaQualidade }) {
+  const competencia = competenciaAtual();
+  const { data, isLoading } = useQuery({
+    queryKey: ["empresas-qualidade", competencia],
+    queryFn: () => listEmpresasQualidade({ data: { competencia } }),
+  });
+  const [faixa, setFaixa] = useState<FaixaQualidade | "todas">(faixaInicial ?? "todas");
+  const empresas = data?.empresas ?? [];
+  const counts = { alta: 0, media: 0, baixa: 0 };
+  empresas.forEach((e) => { counts[e.faixa]++; });
+  const visiveis = faixa === "todas" ? empresas : empresas.filter((e) => e.faixa === faixa);
+
+  return (
+    <>
+      <PageHeader
+        title="Qualidade da carteira"
+        description={`Confiança média da IA por empresa · ${formatCompetencia(competencia)}. Separe a carteira para distribuir o trabalho.`}
+        actions={<Button variant="outline" asChild><Link to="/clientes" search={{}}>← Carteira completa</Link></Button>}
+      />
+
+      <ResumoTela itens={[
+        { label: "Com dados no mês", value: empresas.length },
+        { label: "≥80% · semi-auto", value: counts.alta, tone: "ok" as const },
+        { label: "60–80% · parcial", value: counts.media },
+        { label: "<60% · revisão total", value: counts.baixa, tone: "warn" as const },
+      ]} />
+
+      <Card className="border-border">
+        <div className="space-y-3 border-b border-border p-4">
+          <Tabs value={faixa} onValueChange={(v) => setFaixa(v as FaixaQualidade | "todas")}>
+            <TabsList className="flex-wrap">
+              <TabsTrigger value="todas">Todas ({empresas.length})</TabsTrigger>
+              <TabsTrigger value="alta">≥80% ({counts.alta})</TabsTrigger>
+              <TabsTrigger value="media">60–80% ({counts.media})</TabsTrigger>
+              <TabsTrigger value="baixa">&lt;60% ({counts.baixa})</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Razão Social</TableHead>
+              <TableHead>CNPJ</TableHead>
+              <TableHead>Consultor</TableHead>
+              <TableHead className="text-right">Confiança média</TableHead>
+              <TableHead className="text-right">Lançamentos</TableHead>
+              <TableHead>Status do mês</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {visiveis.map((e) => (
+              <TableRow key={e.id} className="hover:bg-muted/50">
+                <TableCell>
+                  <Link to="/clientes/$id" params={{ id: e.id }} className="font-medium text-foreground hover:text-primary">{e.razao_social}</Link>
+                  {e.nome_fantasia ? <div className="text-xs text-muted-foreground">{e.nome_fantasia}</div> : null}
+                </TableCell>
+                <TableCell className="font-mono text-xs">{e.cnpj ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                <TableCell className="text-sm">{e.usuarios_perfil?.nome ?? <span className="text-muted-foreground">—</span>}</TableCell>
+                <TableCell className="text-right">
+                  <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-xs font-semibold", FAIXA_META[e.faixa].badge)}>
+                    {Math.round(e.media * 100)}%
+                  </span>
+                </TableCell>
+                <TableCell className="text-right font-mono text-sm">{e.n}</TableCell>
+                <TableCell><StatusPill variant={variantFor(e.status)}>{EMPRESA_STATUS_LABEL[e.status]}</StatusPill></TableCell>
+              </TableRow>
+            ))}
+            {visiveis.length === 0 && (
+              <TableRow><TableCell colSpan={6} className="text-center text-muted-foreground py-8">{isLoading ? "Carregando…" : "Nenhuma empresa nesta faixa no período."}</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
       </Card>
     </>
   );

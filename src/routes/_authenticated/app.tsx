@@ -9,7 +9,7 @@ import { getDashboardStats } from "@/lib/lcr.functions";
 import { EMPRESA_STATUS_LABEL, formatCompetencia, competenciaAtual, calendarioParaCompetencia } from "@/lib/format";
 import {
   Building2, FileClock, BookOpen, GitCompare, AlertTriangle, ListTodo, ArrowRight,
-  Activity, FileText, TrendingUp, TrendingDown, Sparkles, Crown, Scale, Calendar, ChevronDown, Check,
+  Activity, FileText, TrendingUp, TrendingDown, Sparkles, Crown, Scale, Calendar, ChevronDown, Check, Gauge,
 } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
@@ -551,7 +551,45 @@ function Dashboard() {
         </TabsContent>
 
         {/* CARTEIRA — distribuição por regime + status */}
-        <TabsContent value="carteira" className="mt-5">
+        <TabsContent value="carteira" className="mt-5 space-y-5">
+          {/* Qualidade da carteira — separa por grau de confiança da IA p/ distribuir
+              trabalho (Cleiton). Cada faixa leva à visão filtrada em /clientes. */}
+          <Card className="rounded-3xl border-0 shadow-soft">
+            <CardContent className="p-6">
+              <div className="mb-4 flex items-center gap-2">
+                <span className="flex h-9 w-9 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+                  <Gauge className="h-4 w-4" />
+                </span>
+                <div>
+                  <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Qualidade da carteira</div>
+                  <h3 className="font-display text-lg">Confiança média da IA · {formatCompetencia(data.competencia)}</h3>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                {([
+                  { faixa: "alta" as const, val: data.qualidade.alta, label: "≥ 80% de confiança", sub: "candidatas a semi-automático", tile: "border-primary/30 bg-primary/5 hover:bg-primary/10", num: "text-primary" },
+                  { faixa: "media" as const, val: data.qualidade.media, label: "60 – 80%", sub: "revisão parcial", tile: "border-amber-300 bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/20", num: "text-amber-600" },
+                  { faixa: "baixa" as const, val: data.qualidade.baixa, label: "< 60%", sub: "revisão total", tile: "border-destructive/30 bg-destructive/5 hover:bg-destructive/10", num: "text-destructive" },
+                ]).map((k) => (
+                  <Link
+                    key={k.faixa}
+                    to="/clientes"
+                    search={{ filtro: "qualidade", faixa: k.faixa }}
+                    className={cn("group rounded-2xl border p-4 transition-colors", k.tile)}
+                  >
+                    <div className={cn("font-display text-4xl leading-none", k.num)}>{k.val}</div>
+                    <div className="mt-2 text-sm font-medium text-foreground">{k.label}</div>
+                    <div className="text-xs text-muted-foreground">{k.sub}</div>
+                    <div className="mt-2 inline-flex items-center gap-1 text-xs font-medium text-primary opacity-0 transition-opacity group-hover:opacity-100">
+                      Ver empresas <ArrowRight className="h-3 w-3" />
+                    </div>
+                  </Link>
+                ))}
+              </div>
+              <p className="mt-3 text-[11px] text-muted-foreground">Média de confiança dos lançamentos do mês por empresa. Empresas sem lançamentos classificados no período não entram.</p>
+            </CardContent>
+          </Card>
+
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <Card className="rounded-3xl border-0 shadow-soft">
               <CardContent className="p-6">

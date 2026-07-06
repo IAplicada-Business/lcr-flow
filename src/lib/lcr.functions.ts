@@ -56,7 +56,7 @@ export const getDashboardStats = createServerFn({ method: "GET" })
     }
     const compAnterior = seisMeses[seisMeses.length - 2];
 
-    const [empresas, docsAguardando, lancamentosMes, conciliacoesPendentes, fases, atencaoUrgente, docsRows, conciliacoesRows, tarefasRows, serieLanc, serieConcil, lancMesAnterior, empresasRegime, topClientesRaw] = await Promise.all([
+    const [empresas, docsAguardando, lancamentosMes, conciliacoesPendentes, fases, atencaoUrgente, docsRows, conciliacoesRows, tarefasRows, serieLanc, serieConcil, lancMesAnterior, empresasRegime, topClientesRaw, qualidadeRows] = await Promise.all([
       supabase.from("empresas").select("id", { count: "exact", head: true }),
       supabase.from("documentos").select("id", { count: "exact", head: true }).in("status", ["recebido", "classificado"]),
       supabase.from("lancamentos").select("id", { count: "exact", head: true }).in("competencia", competenciasSel),
@@ -78,6 +78,9 @@ export const getDashboardStats = createServerFn({ method: "GET" })
       // (documento_id NOT NULL). Isso evita que seeds de demonstração ou
       // lançamentos manuais fictícios inflem o ranking.
       supabase.from("lancamentos").select("empresa_id, empresas(razao_social)").in("competencia", competenciasSel).not("documento_id", "is", null).limit(2000),
+      // Qualidade da carteira: média de confidence por empresa (só lançamentos
+      // com confidence não-nulo), agregada no banco via RPC.
+      supabase.rpc("qualidade_carteira", { p_competencias: competenciasSel }),
     ]);
 
     const faseCounts: Record<string, number> = { cobranca: 0, lancamento: 0, conciliacao: 0, entregue: 0 };
@@ -152,6 +155,19 @@ export const getDashboardStats = createServerFn({ method: "GET" })
     });
     const topClientes = Object.values(porEmpresa).sort((a, b) => b.total - a.total).slice(0, 5);
 
+    // Qualidade da carteira: bucketiza empresas pela média de confidence do
+    // período. alta ≥80% (candidatas a semi-automático) · média 60–80% (revisão
+    // parcial) · baixa <60% (revisão total). Empresa sem confidence no período
+    // não entra (fica "sem dados").
+    const qualidade = { alta: 0, media: 0, baixa: 0 };
+    ((qualidadeRows.data ?? []) as { empresa_id: string; media: number | null; n: number }[]).forEach((r) => {
+      const m = Number(r.media);
+      if (Number.isNaN(m)) return;
+      if (m >= 0.8) qualidade.alta++;
+      else if (m >= 0.6) qualidade.media++;
+      else qualidade.baixa++;
+    });
+
     // Saúde operacional: % docs já processados/conciliados (proxy de SLA).
     const docsCompletos = docsByStatus.processado + docsByStatus.conciliado;
     const saudeDocs = totalDocs > 0 ? Math.round((docsCompletos / totalDocs) * 100) : 0;
@@ -173,6 +189,7 @@ export const getDashboardStats = createServerFn({ method: "GET" })
       saudeDocs,
       taxaConcluidas,
       taxaDivergencias,
+      qualidade,
       atencaoUrgente: atencaoUrgente.data ?? [],
       serieMensal,
       regimes,
@@ -208,6 +225,38 @@ export const listEmpresas = createServerFn({ method: "GET" })
       .order("razao_social");
     if (error) throw new Error(error.message);
     return data ?? [];
+  });
+
+// Qualidade da carteira por empresa (para a visão /clientes?filtro=qualidade):
+// média de confidence da competência via RPC + dados da empresa, já com a faixa
+// (alta ≥80% · media 60–80% · baixa <60%). Retorna só empresas COM lançamento de
+// confidence no período, ordenadas por média crescente (pior → melhor = fila de
+// trabalho). O front filtra por faixa.
+export const listEmpresasQualidade = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) =>
+    z.object({ competencia: z.string().regex(/^\d{4}-\d{2}$/).optional() }).optional().parse(d ?? {}),
+  )
+  .handler(async ({ context, data }) => {
+    // Fallback = competência de trabalho (mês corrente - 1), igual ao default do
+    // dashboard; na prática o front sempre passa `competencia`.
+    const fb = new Date(); fb.setDate(1); fb.setMonth(fb.getMonth() - 1);
+    const competencia = data?.competencia ?? `${fb.getFullYear()}-${String(fb.getMonth() + 1).padStart(2, "0")}`;
+    const { data: rows, error } = await context.supabase.rpc("qualidade_carteira", { p_competencias: [competencia] });
+    if (error) throw new Error(error.message);
+    const stats = new Map((rows ?? []).map((r) => [r.empresa_id, { media: Number(r.media), n: r.n }]));
+    if (stats.size === 0) return { competencia, empresas: [] as const };
+    const { data: emps, error: eErr } = await context.supabase
+      .from("empresas")
+      .select("id, razao_social, nome_fantasia, cnpj, status, tags, usuarios_perfil:consultor_id(nome)")
+      .in("id", [...stats.keys()]);
+    if (eErr) throw new Error(eErr.message);
+    const faixaDe = (m: number) => (m >= 0.8 ? "alta" : m >= 0.6 ? "media" : "baixa");
+    const empresas = (emps ?? []).map((e) => {
+      const s = stats.get(e.id)!;
+      return { ...e, media: s.media, n: s.n, faixa: faixaDe(s.media) as "alta" | "media" | "baixa" };
+    }).sort((a, b) => a.media - b.media);
+    return { competencia, empresas };
   });
 
 // Paginação + busca server-side da carteira (escala pra 902+ clientes).

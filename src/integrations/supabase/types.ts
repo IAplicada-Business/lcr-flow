@@ -1703,6 +1703,14 @@ export type Database = {
         }[]
       }
       is_admin: { Args: never; Returns: boolean }
+      qualidade_carteira: {
+        Args: { p_competencias: string[] }
+        Returns: {
+          empresa_id: string
+          media: number
+          n: number
+        }[]
+      }
       sci_planilha: {
         Args: { p_competencia: string; p_empresa_id: string }
         Returns: {
