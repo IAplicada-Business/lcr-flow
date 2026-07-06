@@ -1123,13 +1123,16 @@ export const getDocumentoRevisao = createServerFn({ method: "GET" })
   });
 
 // Escape hatch do dedup: "Não é duplicata / processar mesmo assim" — limpa a marca
-// de duplicata; o front então dispara processar-documento p/ gerar a razão.
+// de duplicata E seta nao_duplicata=true (sticky), que a edge respeita p/ NÃO
+// re-marcar no reprocesso (senão reencontraria o original → escape hatch no-op).
+// O front então dispara processar-documento p/ gerar a razão.
 export const desmarcarDuplicata = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: unknown) => z.object({ documento_id: z.string().uuid() }).parse(d))
   .handler(async ({ context, data }) => {
     const { error } = await context.supabase.from("documentos")
-      .update({ duplicata_de: null, status_processamento: "pendente" }).eq("id", data.documento_id);
+      .update({ duplicata_de: null, nao_duplicata: true, status_processamento: "pendente" })
+      .eq("id", data.documento_id);
     if (error) throw new Error(error.message);
     return { ok: true };
   });

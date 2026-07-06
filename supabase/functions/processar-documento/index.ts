@@ -79,8 +79,11 @@ DEFINIÇÕES ADICIONAIS:
   tabela contínua de movimentações do período.
 
 2. Extraia os dados estruturados relevantes (resumo no campo dados_extraidos).
-   Para extrato bancário, extraia SEMPRE:
-     - banco, agencia, conta
+   Para extrato bancário, extraia SEMPRE (preencha os campos de TOPO 'agencia' e
+   'conta', além do resumo em dados_extraidos):
+     - banco
+     - agencia (só o número) e conta (conta corrente COM o dígito verificador, com
+       traço, como no cabeçalho — ex.: '33033-2'; não concatene o DV)
      - saldo_inicial e saldo_final (formato numérico)
      - periodo_inicio e periodo_fim (AAAA-MM-DD)
      - lista de movimentações
@@ -178,20 +181,32 @@ function mapearTipoIa(tipo: string | undefined | null): string | null {
   return null;
 }
 
-// Dedup por identidade: chave 'agencia|conta|AAAA-MM' (mesma normalização do motor
-// local em src/parsers/extrato_bancario.py — dígitos sem zeros à esquerda). O banco
-// não entra na chave (o nº da conta já o identifica dentro do cliente). null se
-// agência/conta faltarem → não deduplica.
+// Dedup por identidade: chave 'agencia|conta|AAAA-MM'. MESMA normalização do motor
+// local (src/parsers/extrato_bancario.py). O banco não entra na chave (o nº da conta
+// já o identifica dentro do cliente). null se agência/conta faltarem → não deduplica.
 function _digitosSemZeros(s: unknown): string | null {
   const d = String(s ?? "").replace(/\D/g, "").replace(/^0+/, "");
   return d || null;
 }
-function chaveExtrato(dadosExtraidos: unknown, competencia: string): string | null {
-  const obj = typeof dadosExtraidos === "string"
-    ? (() => { try { return JSON.parse(dadosExtraidos); } catch { return {}; } })()
-    : ((dadosExtraidos ?? {}) as Record<string, unknown>);
-  const ag = _digitosSemZeros((obj as Record<string, unknown>).agencia);
-  const ct = _digitosSemZeros((obj as Record<string, unknown>).conta ?? (obj as Record<string, unknown>).conta_corrente);
+// Conta canônica: dígitos, sem zeros à esquerda e SEM dígito verificador (grupo de
+// 1-2 dígitos após separador -./espaço no fim). Espelha _norm_conta do Python — sem
+// isto '33033-2' (local) vira '330332' e '33033' (IA soltou o DV) não casa.
+function _normConta(raw: unknown): string | null {
+  const s = String(raw ?? "");
+  const m = s.match(/[-./ ](\d{1,2})\s*$/);
+  let dig = s.replace(/\D/g, "");
+  if (m && dig.length > m[1].length) dig = dig.slice(0, -m[1].length);
+  return dig.replace(/^0+/, "") || null;
+}
+// Lê agência/conta dos campos estruturados de topo (agencia/conta no schema) com
+// fallback ao resumo free-form dados_extraidos (compat com docs antigos).
+function chaveExtrato(classificacao: Record<string, unknown>, competencia: string): string | null {
+  const de = classificacao?.dados_extraidos;
+  const obj = typeof de === "string"
+    ? (() => { try { return JSON.parse(de); } catch { return {}; } })()
+    : ((de ?? {}) as Record<string, unknown>);
+  const ag = _digitosSemZeros(classificacao?.agencia ?? obj.agencia);
+  const ct = _normConta(classificacao?.conta ?? classificacao?.conta_corrente ?? obj.conta ?? obj.conta_corrente);
   const comp = (competencia ?? "").slice(0, 7);
   if (!ag || !ct || comp.length !== 7) return null;
   return `${ag}|${ct}|${comp}`;
@@ -206,6 +221,8 @@ const SCHEMA = {
     competencia: { type: "string", description: "AAAA-MM" },
     confidence_geral: { type: "number" },
     dados_extraidos: { type: "string", description: "Resumo/JSON dos dados extraídos" },
+    agencia: { type: "string", description: "Só p/ extrato bancário: número da agência (ex.: '4465')." },
+    conta: { type: "string", description: "Só p/ extrato bancário: conta corrente COM o dígito verificador, como impressa no cabeçalho (ex.: '33033-2'). Use o traço; não concatene o DV." },
     dados_suporte: {
       type: "object",
       additionalProperties: false,
@@ -272,7 +289,7 @@ Deno.serve(async (req) => {
 
   const { data: doc, error: docErr } = await admin
     .from("documentos")
-    .select("id, empresa_id, tipo, competencia, arquivo_url, arquivo_nome, storage_path, empresa:empresas(razao_social, cnpj)")
+    .select("id, empresa_id, tipo, competencia, arquivo_url, arquivo_nome, storage_path, nao_duplicata, empresa:empresas(razao_social, cnpj)")
     .eq("id", documento_id)
     .maybeSingle();
   if (docErr) return fail(docErr.message);
@@ -349,7 +366,7 @@ Deno.serve(async (req) => {
 
   let classificacao: {
     tipo_documento: string; competencia?: string; confidence_geral?: number;
-    dados_extraidos?: string; observacoes?: string;
+    dados_extraidos?: string; agencia?: string; conta?: string; conta_corrente?: string; observacoes?: string;
     lancamentos_sugeridos: { data_lancamento: string; valor: number; tipo_movimento?: string; conta_codigo: string; historico_codigo?: string; descricao: string; confidence?: number; participante?: string }[];
   };
   try {
@@ -447,9 +464,11 @@ Deno.serve(async (req) => {
   // razão mas NÃO sobrescreve o extrato bancário na conciliação daquela competência.
   // Dedup por IDENTIDADE (banco/agência/conta/mês = mesmo extrato). Se já existe um
   // original com esta chave nesta empresa → marca ESTE como duplicata e NÃO gera
-  // razão (regra Rafa+Cleiton). Escapa por 'Não é duplicata / processar mesmo assim'.
-  const chaveDedup = isExtratoBancario ? chaveExtrato(classificacao.dados_extraidos, competencia) : null;
-  if (chaveDedup) {
+  // razão (regra Rafa+Cleiton). Escapa por 'Não é duplicata / processar mesmo assim':
+  // esse botão seta nao_duplicata=true, que ESTE guard respeita — senão o reprocesso
+  // reencontraria o original e re-marcaria o doc como duplicata (escape hatch no-op).
+  const chaveDedup = isExtratoBancario ? chaveExtrato(classificacao, competencia) : null;
+  if (chaveDedup && !doc.nao_duplicata) {
     const { data: orig } = await admin.from("documentos").select("id, arquivo_nome")
       .eq("empresa_id", doc.empresa_id).eq("extrato_chave", chaveDedup)
       .is("duplicata_de", null).neq("id", documento_id).limit(1).maybeSingle();
@@ -480,8 +499,8 @@ Deno.serve(async (req) => {
       ? (() => { try { return JSON.parse(dadosStr); } catch { return {}; } })()
       : (dadosStr as Record<string, unknown>);
     const banco = String(dadosObj.banco ?? "").trim();
-    const agencia = String(dadosObj.agencia ?? "").trim();
-    const conta = String(dadosObj.conta ?? dadosObj.conta_corrente ?? "").trim();
+    const agencia = String(classificacao.agencia ?? dadosObj.agencia ?? "").trim();
+    const conta = String(classificacao.conta ?? classificacao.conta_corrente ?? dadosObj.conta ?? dadosObj.conta_corrente ?? "").trim();
     if (banco && agencia && conta) {
       const { data: existente } = await admin
         .from("contas_bancarias")

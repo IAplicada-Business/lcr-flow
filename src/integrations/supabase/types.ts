@@ -611,6 +611,7 @@ export type Database = {
           id: string
           lancamentos_gerados: number | null
           mime_type: string | null
+          nao_duplicata: boolean
           origem: Database["public"]["Enums"]["documento_origem"]
           processado_em: string | null
           recebido_em: string
@@ -640,6 +641,7 @@ export type Database = {
           id?: string
           lancamentos_gerados?: number | null
           mime_type?: string | null
+          nao_duplicata?: boolean
           origem?: Database["public"]["Enums"]["documento_origem"]
           processado_em?: string | null
           recebido_em?: string
@@ -669,6 +671,7 @@ export type Database = {
           id?: string
           lancamentos_gerados?: number | null
           mime_type?: string | null
+          nao_duplicata?: boolean
           origem?: Database["public"]["Enums"]["documento_origem"]
           processado_em?: string | null
           recebido_em?: string
