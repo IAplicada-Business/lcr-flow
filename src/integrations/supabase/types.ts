@@ -556,7 +556,9 @@ export type Database = {
           created_at: string
           dados_extraidos: Json
           documento_id: string | null
+          duplicata_de: string | null
           empresa_id: string
+          extrato_chave: string | null
           gestta_ref: string | null
           hash_sha256: string | null
           id: string
@@ -583,7 +585,9 @@ export type Database = {
           created_at?: string
           dados_extraidos?: Json
           documento_id?: string | null
+          duplicata_de?: string | null
           empresa_id: string
+          extrato_chave?: string | null
           gestta_ref?: string | null
           hash_sha256?: string | null
           id?: string
@@ -610,7 +614,9 @@ export type Database = {
           created_at?: string
           dados_extraidos?: Json
           documento_id?: string | null
+          duplicata_de?: string | null
           empresa_id?: string
+          extrato_chave?: string | null
           gestta_ref?: string | null
           hash_sha256?: string | null
           id?: string
@@ -633,6 +639,13 @@ export type Database = {
             columns: ["competencia_id"]
             isOneToOne: false
             referencedRelation: "competencias"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "documentos_duplicata_de_fkey"
+            columns: ["duplicata_de"]
+            isOneToOne: false
+            referencedRelation: "documentos"
             referencedColumns: ["id"]
           },
           {
