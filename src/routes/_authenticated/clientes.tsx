@@ -20,12 +20,15 @@ import { requireAcesso } from "@/lib/guard";
 import { cn } from "@/lib/utils";
 
 type FaixaQualidade = "alta" | "media" | "baixa";
-type ClientesSearch = { filtro?: "qualidade"; faixa?: FaixaQualidade };
+type ClientesSearch = { filtro?: "qualidade"; faixa?: FaixaQualidade; competencia?: string };
 
 export const Route = createFileRoute("/_authenticated/clientes")({
   validateSearch: (s: Record<string, unknown>): ClientesSearch => ({
     filtro: s.filtro === "qualidade" ? "qualidade" : undefined,
     faixa: (["alta", "media", "baixa"] as const).includes(s.faixa as FaixaQualidade) ? (s.faixa as FaixaQualidade) : undefined,
+    // Competência que gerou os números do card do dashboard — mantém a Visão
+    // Qualidade coerente com o que foi clicado (senão cairia no mês default).
+    competencia: typeof s.competencia === "string" && /^\d{4}-\d{2}$/.test(s.competencia) ? s.competencia : undefined,
   }),
   beforeLoad: ({ context }) => requireAcesso(context.queryClient, "clientes", "/clientes"),
   head: () => ({ meta: [{ title: "Clientes — LCR Contábil" }] }),
@@ -51,7 +54,7 @@ function useDebouncedValue<T>(value: T, ms = 300): T {
 
 function ClientesPage() {
   const search = Route.useSearch();
-  if (search.filtro === "qualidade") return <QualidadeCarteira faixaInicial={search.faixa} />;
+  if (search.filtro === "qualidade") return <QualidadeCarteira faixaInicial={search.faixa} competenciaInicial={search.competencia} />;
   return <ListaClientes />;
 }
 
@@ -208,13 +211,25 @@ const FAIXA_META: Record<FaixaQualidade, { badge: string }> = {
 // Visão "Qualidade da carteira" (/clientes?filtro=qualidade): empresas anotadas
 // com a confiança média da IA no mês, filtráveis por faixa. Serve p/ o time
 // separar semi-automático (≥80%) de revisão parcial/total (Cleiton).
-function QualidadeCarteira({ faixaInicial }: { faixaInicial?: FaixaQualidade }) {
-  const competencia = competenciaAtual();
+function QualidadeCarteira({ faixaInicial, competenciaInicial }: { faixaInicial?: FaixaQualidade; competenciaInicial?: string }) {
+  // Usa a competência que veio do card do dashboard (coerência com os números
+  // clicados); só cai no mês de trabalho default se entrar direto pela URL.
+  const competencia = competenciaInicial ?? competenciaAtual();
   const { data, isLoading } = useQuery({
     queryKey: ["empresas-qualidade", competencia],
     queryFn: () => listEmpresasQualidade({ data: { competencia } }),
   });
   const [faixa, setFaixa] = useState<FaixaQualidade | "todas">(faixaInicial ?? "todas");
+
+  if (isLoading && !data) {
+    return (
+      <>
+        <PageHeader title="Qualidade da carteira" description={`Confiança média da IA por empresa · ${formatCompetencia(competencia)}.`} />
+        <Card className="border-border"><div className="py-16 text-center text-muted-foreground">Carregando qualidade da carteira…</div></Card>
+      </>
+    );
+  }
+
   const empresas = data?.empresas ?? [];
   const counts = { alta: 0, media: 0, baixa: 0 };
   empresas.forEach((e) => { counts[e.faixa]++; });

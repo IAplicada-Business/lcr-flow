@@ -574,7 +574,7 @@ function Dashboard() {
                   <Link
                     key={k.faixa}
                     to="/clientes"
-                    search={{ filtro: "qualidade", faixa: k.faixa }}
+                    search={{ filtro: "qualidade", faixa: k.faixa, competencia: data.competencia }}
                     className={cn("group rounded-2xl border p-4 transition-colors", k.tile)}
                   >
                     <div className={cn("font-display text-4xl leading-none", k.num)}>{k.val}</div>
