@@ -162,7 +162,12 @@ function DocsPage() {
                 <TableCell className="text-sm">{formatCompetencia(d.competencia)}</TableCell>
                 <TableCell className="text-xs uppercase text-muted-foreground">{d.origem}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{new Date(d.recebido_em).toLocaleDateString("pt-BR")}</TableCell>
-                <TableCell><StatusPill variant={variantFor(d.status)}>{DOC_STATUS_LABEL[d.status]}</StatusPill></TableCell>
+                <TableCell>
+                  <span className="flex items-center gap-1.5">
+                    {d.duplicata_de && <StatusPill variant="back">Duplicata</StatusPill>}
+                    <StatusPill variant={variantFor(d.status)}>{DOC_STATUS_LABEL[d.status]}</StatusPill>
+                  </span>
+                </TableCell>
                 <TableCell>
                   <div className="flex items-center justify-end gap-2">
                     {temDados(d.dados_extraidos) && (
@@ -170,8 +175,8 @@ function DocsPage() {
                         <Eye className="h-4 w-4" />
                       </Button>
                     )}
-                    {(d.status_processamento === "classificado" || d.status_processamento === "revisado") && (
-                      <Button variant="ghost" size="sm" asChild title="Revisar classificação da IA">
+                    {(d.status_processamento === "classificado" || d.status_processamento === "revisado" || d.duplicata_de) && (
+                      <Button variant="ghost" size="sm" asChild title={d.duplicata_de ? "Ver duplicata" : "Revisar classificação da IA"}>
                         <Link to="/revisar/$documentoId" params={{ documentoId: d.id }}><ClipboardCheck className="h-4 w-4" /></Link>
                       </Button>
                     )}

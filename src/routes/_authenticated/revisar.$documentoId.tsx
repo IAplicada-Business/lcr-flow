@@ -5,7 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { StatusPill } from "@/components/status-pill";
-import { getDocumentoRevisao, aprovarDocumento, limparLancamentosDocumento, mudarTipoDocumento } from "@/lib/lcr.functions";
+import { getDocumentoRevisao, aprovarDocumento, limparLancamentosDocumento, mudarTipoDocumento, desmarcarDuplicata } from "@/lib/lcr.functions";
 import { DOC_TIPO_LABEL, formatCompetencia } from "@/lib/format";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
@@ -64,7 +64,7 @@ export function DocumentoRevisaoView({ documentoId, onAprovado }: { documentoId:
   const key = ["doc-revisao", documentoId];
   const { data: doc, isLoading } = useQuery({ queryKey: key, queryFn: () => getDocumentoRevisao({ data: { id: documentoId } }) });
   const [url, setUrl] = useState<string | null>(null);
-  const [busy, setBusy] = useState<"aprovar" | "reclassificar" | null>(null);
+  const [busy, setBusy] = useState<"aprovar" | "reclassificar" | "desduplicar" | null>(null);
   const [cooldown, setCooldown] = useState(0);
 
   useEffect(() => {
@@ -133,8 +133,29 @@ export function DocumentoRevisaoView({ documentoId, onAprovado }: { documentoId:
     } finally { setBusy(null); setCooldown(60); }
   }
 
+  async function processarMesmoAssim() {
+    setBusy("desduplicar");
+    try {
+      await desmarcarDuplicata({ data: { documento_id: documentoId } });
+      const { data: res, error } = await supabase.functions.invoke("processar-documento", { body: { documento_id: documentoId } });
+      if (error) throw new Error(error.message);
+      const r = res as { ok?: boolean; lancamentos_gerados?: number; error?: string } | null;
+      if (!r?.ok) throw new Error(r?.error ?? "Falha ao processar");
+      await qc.invalidateQueries({ queryKey: key });
+      await qc.invalidateQueries({ queryKey: ["documentos"] });
+      await qc.invalidateQueries({ queryKey: ["lanc-conc"] });
+      router.invalidate();
+      toast.success(`Processado como extrato próprio — ${r.lancamentos_gerados ?? 0} lançamento(s).`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro");
+    } finally { setBusy(null); }
+  }
+
   if (isLoading) return <div className="flex h-40 items-center justify-center text-muted-foreground"><Loader2 className="mr-2 h-4 w-4 animate-spin" />Carregando…</div>;
   if (!doc) return <div className="p-6 text-muted-foreground">Documento não encontrado.</div>;
+
+  const duplicataDe = (doc as { duplicata_de?: string | null }).duplicata_de ?? null;
+  const dupOriginal = (doc as { duplicata_original?: { arquivo_nome?: string; competencia?: string } | null }).duplicata_original ?? null;
 
   const classificacao = (doc.classificacao_ia ?? {}) as Classificacao;
   const sugestoes = classificacao.lancamentos_sugeridos ?? [];
@@ -155,8 +176,35 @@ export function DocumentoRevisaoView({ documentoId, onAprovado }: { documentoId:
           {DOC_TIPO_LABEL[doc.tipo as keyof typeof DOC_TIPO_LABEL] ?? doc.tipo} · Competência {formatCompetencia(doc.competencia)}
           {doc.arquivo_nome ? ` · ${doc.arquivo_nome}` : ""}
         </p>
-        <StatusPill variant={revisado ? "now" : "next"}>{revisado ? "Revisado" : "Aguardando revisão"}</StatusPill>
+        <div className="flex items-center gap-2">
+          {duplicataDe && <StatusPill variant="back">Duplicata</StatusPill>}
+          <StatusPill variant={revisado ? "now" : "next"}>{revisado ? "Revisado" : "Aguardando revisão"}</StatusPill>
+        </div>
       </div>
+
+      {duplicataDe && (
+        <Card className="mb-5 border-amber-300 bg-amber-50/60">
+          <CardContent className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-start gap-3">
+              <GitCompare className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+              <div className="text-sm">
+                <p className="font-medium text-amber-800">Extrato duplicado — não gerou razão</p>
+                <p className="text-amber-700">
+                  Mesma conta/banco/mês de{" "}
+                  <Link to="/revisar/$documentoId" params={{ documentoId: duplicataDe }} className="font-medium underline hover:text-amber-900">
+                    {dupOriginal?.arquivo_nome ?? "outro extrato"}
+                  </Link>
+                  . Para evitar razão em dobro, este documento foi marcado como duplicata.
+                </p>
+              </div>
+            </div>
+            <Button variant="outline" size="sm" className="shrink-0" disabled={busy !== null} onClick={processarMesmoAssim}>
+              {busy === "desduplicar" ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+              Não é duplicata / processar mesmo assim
+            </Button>
+          </CardContent>
+        </Card>
+      )}
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         {/* Documento original */}

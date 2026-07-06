@@ -561,7 +561,7 @@ export const listDocumentos = createServerFn({ method: "GET" })
   .handler(async ({ context, data }) => {
     let q = context.supabase
       .from("documentos")
-      .select("id, tipo, competencia, origem, status, status_processamento, arquivo_nome, arquivo_url, dados_extraidos, classificacao_ia, recebido_em, empresa:empresa_id(id, razao_social), responsavel:responsavel_id(nome)")
+      .select("id, tipo, competencia, origem, status, status_processamento, arquivo_nome, arquivo_url, dados_extraidos, classificacao_ia, duplicata_de, recebido_em, empresa:empresa_id(id, razao_social), responsavel:responsavel_id(nome)")
       .order("recebido_em", { ascending: false })
       .limit(500);
     // Escopa por empresa quando informado (evita que o limite global de 500
@@ -1047,11 +1047,29 @@ export const getDocumentoRevisao = createServerFn({ method: "GET" })
   .handler(async ({ context, data }) => {
     const { data: doc, error } = await context.supabase
       .from("documentos")
-      .select("id, empresa_id, tipo, competencia, arquivo_nome, arquivo_url, storage_path, status_processamento, lancamentos_gerados, classificacao_ia, empresa:empresas(razao_social, nome_fantasia, cnpj)")
+      .select("id, empresa_id, tipo, competencia, arquivo_nome, arquivo_url, storage_path, status_processamento, lancamentos_gerados, classificacao_ia, duplicata_de, extrato_chave, empresa:empresas(razao_social, nome_fantasia, cnpj)")
       .eq("id", data.id)
       .maybeSingle();
     if (error) throw new Error(error.message);
+    // Se for duplicata de outro extrato, traz o nome/competência do original p/ o vínculo.
+    if (doc?.duplicata_de) {
+      const { data: orig } = await context.supabase
+        .from("documentos").select("arquivo_nome, competencia").eq("id", doc.duplicata_de).maybeSingle();
+      (doc as Record<string, unknown>).duplicata_original = orig ?? null;
+    }
     return doc;
+  });
+
+// Escape hatch do dedup: "Não é duplicata / processar mesmo assim" — limpa a marca
+// de duplicata; o front então dispara processar-documento p/ gerar a razão.
+export const desmarcarDuplicata = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((d: unknown) => z.object({ documento_id: z.string().uuid() }).parse(d))
+  .handler(async ({ context, data }) => {
+    const { error } = await context.supabase.from("documentos")
+      .update({ duplicata_de: null, status_processamento: "pendente" }).eq("id", data.documento_id);
+    if (error) throw new Error(error.message);
+    return { ok: true };
   });
 
 export const aprovarDocumento = createServerFn({ method: "POST" })

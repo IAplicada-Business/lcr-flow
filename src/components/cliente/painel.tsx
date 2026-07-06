@@ -100,7 +100,12 @@ export function DocumentosTab({ empresaId, competencia }: { empresaId: string; c
                 </TableCell>
                 <TableCell className="text-sm">{formatCompetencia(d.competencia)}</TableCell>
                 <TableCell className="text-xs uppercase text-muted-foreground">{d.origem}</TableCell>
-                <TableCell><StatusPill variant={variantFor(d.status)}>{DOC_STATUS_LABEL[d.status]}</StatusPill></TableCell>
+                <TableCell>
+                  <span className="flex items-center gap-1.5">
+                    {d.duplicata_de && <StatusPill variant="back">Duplicata</StatusPill>}
+                    <StatusPill variant={variantFor(d.status)}>{DOC_STATUS_LABEL[d.status]}</StatusPill>
+                  </span>
+                </TableCell>
                 <TableCell>
                   <div className="flex items-center justify-end gap-2">
                     {d.arquivo_url && (() => {

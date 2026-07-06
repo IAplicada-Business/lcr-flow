@@ -178,6 +178,25 @@ function mapearTipoIa(tipo: string | undefined | null): string | null {
   return null;
 }
 
+// Dedup por identidade: chave 'agencia|conta|AAAA-MM' (mesma normalização do motor
+// local em src/parsers/extrato_bancario.py — dígitos sem zeros à esquerda). O banco
+// não entra na chave (o nº da conta já o identifica dentro do cliente). null se
+// agência/conta faltarem → não deduplica.
+function _digitosSemZeros(s: unknown): string | null {
+  const d = String(s ?? "").replace(/\D/g, "").replace(/^0+/, "");
+  return d || null;
+}
+function chaveExtrato(dadosExtraidos: unknown, competencia: string): string | null {
+  const obj = typeof dadosExtraidos === "string"
+    ? (() => { try { return JSON.parse(dadosExtraidos); } catch { return {}; } })()
+    : ((dadosExtraidos ?? {}) as Record<string, unknown>);
+  const ag = _digitosSemZeros((obj as Record<string, unknown>).agencia);
+  const ct = _digitosSemZeros((obj as Record<string, unknown>).conta ?? (obj as Record<string, unknown>).conta_corrente);
+  const comp = (competencia ?? "").slice(0, 7);
+  if (!ag || !ct || comp.length !== 7) return null;
+  return `${ag}|${ct}|${comp}`;
+}
+
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -426,6 +445,26 @@ Deno.serve(async (req) => {
   // ─────────── RAZÃO (extrato bancário / fatura de cartão / invest.) ───────────
   // A fonte da conciliação (extrato_csv_url) é SÓ o extrato do banco — cartão gera
   // razão mas NÃO sobrescreve o extrato bancário na conciliação daquela competência.
+  // Dedup por IDENTIDADE (banco/agência/conta/mês = mesmo extrato). Se já existe um
+  // original com esta chave nesta empresa → marca ESTE como duplicata e NÃO gera
+  // razão (regra Rafa+Cleiton). Escapa por 'Não é duplicata / processar mesmo assim'.
+  const chaveDedup = isExtratoBancario ? chaveExtrato(classificacao.dados_extraidos, competencia) : null;
+  if (chaveDedup) {
+    const { data: orig } = await admin.from("documentos").select("id, arquivo_nome")
+      .eq("empresa_id", doc.empresa_id).eq("extrato_chave", chaveDedup)
+      .is("duplicata_de", null).neq("id", documento_id).limit(1).maybeSingle();
+    if (orig) {
+      await admin.from("lancamentos").delete().eq("documento_id", documento_id);
+      await admin.from("documentos").update({
+        status: "recebido", status_processamento: "duplicata", duplicata_de: orig.id,
+        extrato_chave: chaveDedup, lancamentos_gerados: 0, tipo: tipoFinal,
+        classificacao_ia: classificacao, dados_extraidos: classificacao,
+        processado_em: new Date().toISOString(),
+      }).eq("id", documento_id);
+      return json(200, { ok: true, duplicata: true, duplicata_de: orig.id, lancamentos_gerados: 0 });
+    }
+  }
+
   let concPath: string | null = null;
   if (isExtratoBancario) {
     concPath = await uploadExtratoBucket(competencia);
@@ -553,6 +592,7 @@ Deno.serve(async (req) => {
     dados_extraidos: classificacao,
     processado_em: new Date().toISOString(),
     lancamentos_gerados: lancCriados,
+    extrato_chave: chaveDedup,  // identidade p/ dedup dos próximos extratos
   }).eq("id", documento_id);
 
   admin.functions.invoke("enriquecer-extrato", { body: { empresa_id: doc.empresa_id, competencia } })
