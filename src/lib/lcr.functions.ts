@@ -305,6 +305,24 @@ export const getEmpresasResumo = createServerFn({ method: "GET" })
     };
   });
 
+// KPIs da tela de Documentos: contagem por status NO SERVIDOR. A lista
+// (listDocumentos) é capada em 500 e são +13k docs — contar no cliente sobre a
+// amostra dava número errado e "congelado". Count exato via head, sem trazer linhas.
+export const getDocumentosResumo = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async ({ context }) => {
+    const s = context.supabase;
+    const cnt = async (q: PromiseLike<{ count: number | null }>) => (await q).count ?? 0;
+    const [total, recebido, classificado, processado, conciliado] = await Promise.all([
+      cnt(s.from("documentos").select("id", { count: "exact", head: true })),
+      cnt(s.from("documentos").select("id", { count: "exact", head: true }).eq("status", "recebido")),
+      cnt(s.from("documentos").select("id", { count: "exact", head: true }).eq("status", "classificado")),
+      cnt(s.from("documentos").select("id", { count: "exact", head: true }).eq("status", "processado")),
+      cnt(s.from("documentos").select("id", { count: "exact", head: true }).eq("status", "conciliado")),
+    ]);
+    return { total, recebido, classificado, processado, conciliado };
+  });
+
 // Notificações reais para o sino da topbar: docs pendentes, conciliações com
 // divergência, tarefas em atraso.
 export const getNotificacoes = createServerFn({ method: "GET" })

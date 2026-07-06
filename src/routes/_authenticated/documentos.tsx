@@ -12,7 +12,7 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Plus, Download, Sparkles, Eye, Loader2, ClipboardCheck } from "lucide-react";
 import { StatusPill, variantFor } from "@/components/status-pill";
-import { listDocumentos, listEmpresas, createDocumento, setDocumentoStatus, ensureCompetencia } from "@/lib/lcr.functions";
+import { listDocumentos, listEmpresas, createDocumento, setDocumentoStatus, ensureCompetencia, getDocumentosResumo } from "@/lib/lcr.functions";
 import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
@@ -24,6 +24,7 @@ export const Route = createFileRoute("/_authenticated/documentos")({
   loader: async ({ context }) => {
     await Promise.all([
       context.queryClient.ensureQueryData({ queryKey: ["documentos"], queryFn: () => listDocumentos() }),
+      context.queryClient.ensureQueryData({ queryKey: ["documentos-resumo"], queryFn: () => getDocumentosResumo() }),
       context.queryClient.ensureQueryData({ queryKey: ["empresas"], queryFn: () => listEmpresas() }),
     ]);
   },
@@ -34,6 +35,9 @@ export const Route = createFileRoute("/_authenticated/documentos")({
 function DocsPage() {
   const qc = useQueryClient();
   const { data: docs } = useSuspenseQuery({ queryKey: ["documentos"], queryFn: () => listDocumentos() });
+  // KPIs contados no servidor (a lista `docs` é capada em 500). refetch a cada 10s
+  // p/ não "congelar" enquanto o pipeline processa documentos.
+  const { data: resumo } = useSuspenseQuery({ queryKey: ["documentos-resumo"], queryFn: () => getDocumentosResumo(), refetchInterval: 10000 });
   const { data: empresas } = useSuspenseQuery({ queryKey: ["empresas"], queryFn: () => listEmpresas() });
   const [empresa, setEmpresa] = useState("all");
   const [tipo, setTipo] = useState("all");
@@ -51,6 +55,7 @@ function DocsPage() {
       if (error) throw new Error(error.message);
       if (data && data.ok === false) throw new Error(data.error ?? "Falha ao processar");
       qc.invalidateQueries({ queryKey: ["documentos"] });
+      qc.invalidateQueries({ queryKey: ["documentos-resumo"] });
       toast.success("Documento processado pela IA.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro");
@@ -84,6 +89,7 @@ function DocsPage() {
     if (idx < 0 || idx === ordem.length - 1) return;
     await setDocumentoStatus({ data: { id, status: ordem[idx + 1] } });
     qc.invalidateQueries({ queryKey: ["documentos"] });
+    qc.invalidateQueries({ queryKey: ["documentos-resumo"] });
   }
 
   return (
@@ -102,11 +108,11 @@ function DocsPage() {
       />
 
       <ResumoTela itens={[
-        { label: "Documentos", value: docs.length },
-        { label: "Recebidos", value: docs.filter((d) => d.status === "recebido").length },
-        { label: "Classificados", value: docs.filter((d) => d.status === "classificado").length },
-        { label: "Processados", value: docs.filter((d) => d.status === "processado").length, tone: "ok" as const },
-        { label: "Conciliados", value: docs.filter((d) => d.status === "conciliado").length, tone: "ok" as const },
+        { label: "Documentos", value: resumo.total },
+        { label: "Recebidos", value: resumo.recebido },
+        { label: "Classificados", value: resumo.classificado },
+        { label: "Processados", value: resumo.processado, tone: "ok" as const },
+        { label: "Conciliados", value: resumo.conciliado, tone: "ok" as const },
       ]} />
 
       <Card className="border-border">
