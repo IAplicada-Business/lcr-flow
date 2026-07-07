@@ -3,6 +3,7 @@
 // cria os lançamentos contábeis sugeridos no banco.
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "jsr:@supabase/supabase-js@2";
+import { chaveDedupParaDoc, deveMarcarDuplicata, _sobreposicao } from "./dedup.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -181,71 +182,8 @@ function mapearTipoIa(tipo: string | undefined | null): string | null {
   return null;
 }
 
-// Dedup por identidade: chave 'agencia|conta|AAAA-MM'. MESMA normalização do motor
-// local (src/parsers/extrato_bancario.py). O banco não entra na chave (o nº da conta
-// já o identifica dentro do cliente). null se agência/conta faltarem → não deduplica.
-function _digitosSemZeros(s: unknown): string | null {
-  const d = String(s ?? "").replace(/\D/g, "").replace(/^0+/, "");
-  return d || null;
-}
-// Conta canônica: dígitos, sem zeros à esquerda e SEM dígito verificador (grupo de
-// 1-2 dígitos após separador -./espaço no fim). Espelha _norm_conta do Python — sem
-// isto '33033-2' (local) vira '330332' e '33033' (IA soltou o DV) não casa.
-function _normConta(raw: unknown): string | null {
-  const s = String(raw ?? "");
-  const m = s.match(/[-./ ](\d{1,2})\s*$/);
-  let dig = s.replace(/\D/g, "");
-  if (m && dig.length > m[1].length) dig = dig.slice(0, -m[1].length);
-  return dig.replace(/^0+/, "") || null;
-}
-// Lê agência/conta dos campos estruturados de topo (agencia/conta no schema) com
-// fallback ao resumo free-form dados_extraidos (compat com docs antigos).
-function chaveExtrato(classificacao: Record<string, unknown>, competencia: string): string | null {
-  const de = classificacao?.dados_extraidos;
-  const obj = typeof de === "string"
-    ? (() => { try { return JSON.parse(de); } catch { return {}; } })()
-    : ((de ?? {}) as Record<string, unknown>);
-  const ag = _digitosSemZeros(classificacao?.agencia ?? obj.agencia);
-  const ct = _normConta(classificacao?.conta ?? classificacao?.conta_corrente ?? obj.conta ?? obj.conta_corrente);
-  const comp = (competencia ?? "").slice(0, 7);
-  if (!ag || !ct || comp.length !== 7) return null;
-  return `${ag}|${ct}|${comp}`;
-}
-
-// #4: investimento fica FORA do dedup por identidade. A chave é agência|conta|mês
-// SEM banco, então um CDB (mesmo se a IA o tipar como extrato_bancario) colidiria
-// com a CC do mesmo mês; com overlap>=60% seria marcado duplicata e perderia razão.
-// Movimento de investimento gera razão própria — não deve ser deduplicado contra a CC.
-// Mesma lista de termos que o roteamento usa (detectar_tipo no motor local).
-const INVESTIMENTO_KW = ["posic", "posiç", "investiment", "aplicac", "aplicaç",
-                         "renda fixa", "renda-fixa", "cdb"];
-function _ehInvestimentoNome(nome: unknown): boolean {
-  const n = String(nome ?? "").toLowerCase();
-  return INVESTIMENTO_KW.some((k) => n.includes(k));
-}
-
-// Confirma dedup por identidade: a chave (agência|conta|mês) NÃO inclui o banco, então
-// dois bancos com mesma ag/conta/mês colidiriam. Antes de marcar duplicata, exigimos
-// sobreposição real das transações (mesmo extrato ~100%; colisão de chave ~0%).
-const OVERLAP_MIN_DEDUP = 0.6;
-function _assinLanc(rows: { data_lancamento?: string | null; valor?: number | null }[]): Set<string> {
-  const s = new Set<string>();
-  for (const r of rows ?? []) {
-    const v = Number(r?.valor);
-    if (!Number.isFinite(v)) continue;
-    const d = String(r?.data_lancamento ?? "").slice(0, 10);
-    s.add(`${d}|${(Math.round(Math.abs(v) * 100) / 100).toFixed(2)}`);
-  }
-  return s;
-}
-function _sobreposicao(aRows: { data_lancamento?: string | null; valor?: number | null }[],
-                      bRows: { data_lancamento?: string | null; valor?: number | null }[]): number {
-  const a = _assinLanc(aRows), b = _assinLanc(bRows);
-  if (!a.size || !b.size) return 0;
-  let inter = 0;
-  for (const x of a) if (b.has(x)) inter++;
-  return inter / Math.min(a.size, b.size);
-}
+// Helpers do dedup por identidade (chaveExtrato/_normConta/_sobreposicao/decisão)
+// vivem em ./dedup.ts — extraídos p/ teste (dedup.test.ts). Ver comentários lá.
 
 const SCHEMA = {
   type: "object",
@@ -502,8 +440,7 @@ Deno.serve(async (req) => {
   // razão (regra Rafa+Cleiton). Escapa por 'Não é duplicata / processar mesmo assim':
   // esse botão seta nao_duplicata=true, que ESTE guard respeita — senão o reprocesso
   // reencontraria o original e re-marcaria o doc como duplicata (escape hatch no-op).
-  const chaveDedup = (isExtratoBancario && !_ehInvestimentoNome(doc.arquivo_nome))
-    ? chaveExtrato(classificacao, competencia) : null;
+  const chaveDedup = chaveDedupParaDoc(isExtratoBancario, doc.arquivo_nome, classificacao, competencia);
   if (chaveDedup && !doc.nao_duplicata) {
     const { data: orig } = await admin.from("documentos").select("id, arquivo_nome")
       .eq("empresa_id", doc.empresa_id).eq("extrato_chave", chaveDedup)
@@ -514,7 +451,7 @@ Deno.serve(async (req) => {
       const { data: origLancs } = await admin.from("lancamentos")
         .select("data_lancamento, valor").eq("documento_id", orig.id).eq("fonte_extrato", true);
       const ov = _sobreposicao(classificacao.lancamentos_sugeridos ?? [], origLancs ?? []);
-      if ((origLancs?.length ?? 0) > 0 && ov >= OVERLAP_MIN_DEDUP) {
+      if (deveMarcarDuplicata(chaveDedup, true, origLancs ?? [], classificacao.lancamentos_sugeridos ?? [])) {
         await admin.from("lancamentos").delete().eq("documento_id", documento_id);
         await admin.from("documentos").update({
           status: "recebido", status_processamento: "duplicata", duplicata_de: orig.id,
