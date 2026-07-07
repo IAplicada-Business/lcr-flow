@@ -28,8 +28,23 @@ APPLY = "--apply" in sys.argv
 COMPS = [a for a in sys.argv[1:] if a.startswith("20") and len(a) == 7]
 CLIENTE = sys.argv[sys.argv.index("--cliente") + 1] if "--cliente" in sys.argv else None
 
+# Termos de investimento/posição — MESMA lista que bridge_front.detectar_tipo usa p/
+# rotear esses docs à edge. Investimento fica FORA do dedup por identidade (#4): a chave
+# é agência|conta|mês SEM banco, então um CDB pode colidir com a CC do mesmo mês; se a
+# sobreposição passar de 60% o CDB seria marcado duplicata e perderia razão. Melhor não
+# deduplicar investimento aqui (o backstop de sobreposição ainda pega dobra real).
+# Ver regra investimento-vs-razão: movimento gera lançamento, posição é suporte.
+INVESTIMENTO_KW = ["posic", "posiç", "investiment", "aplicac", "aplicaç",
+                   "renda fixa", "renda-fixa", "cdb"]
+
+def eh_investimento(d):
+    n = (d.get("arquivo_nome") or "").lower()
+    return any(k in n for k in INVESTIMENTO_KW)
+
 def eh_extrato(d):
     n = (d.get("arquivo_nome") or "").lower()
+    if eh_investimento(d):
+        return False
     return (d.get("tipo") == "extrato" or "extrato" in n) and n.endswith((".xlsx", ".xls", ".pdf", ".csv"))
 
 def keeper_score(d):

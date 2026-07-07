@@ -836,7 +836,11 @@ def processar_arquivos(empresa_id, competencia, arquivos, banco_cod, jwt,
     # Reflete a fase no painel quando NENHUM extrato foi processado pelo motor local
     # (sem extrato-nomeado, ou todos caíram p/ a edge no fallback). Quando o motor
     # local processa um extrato com sucesso, quem seta o status é processar_extrato.
-    extrato_local_ok = any(e.get("documento_id") and not e.get("erro") for e in resumo["extratos"])
+    # Duplicata (#7) NÃO conta como "processado localmente": ela retorna cedo (não gera
+    # razão nem seta status), então uma competência só-de-duplicatas travaria no status
+    # anterior — aqui ela cai no fallback e avança normalmente.
+    extrato_local_ok = any(e.get("documento_id") and not e.get("erro")
+                           and e.get("status") != "duplicata" for e in resumo["extratos"])
     if not extrato_local_ok:
         sb_update("empresas", {"id": empresa_id}, {"status": "lancamento"})
 
