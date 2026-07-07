@@ -212,6 +212,29 @@ function chaveExtrato(classificacao: Record<string, unknown>, competencia: strin
   return `${ag}|${ct}|${comp}`;
 }
 
+// Confirma dedup por identidade: a chave (agência|conta|mês) NÃO inclui o banco, então
+// dois bancos com mesma ag/conta/mês colidiriam. Antes de marcar duplicata, exigimos
+// sobreposição real das transações (mesmo extrato ~100%; colisão de chave ~0%).
+const OVERLAP_MIN_DEDUP = 0.6;
+function _assinLanc(rows: { data_lancamento?: string | null; valor?: number | null }[]): Set<string> {
+  const s = new Set<string>();
+  for (const r of rows ?? []) {
+    const v = Number(r?.valor);
+    if (!Number.isFinite(v)) continue;
+    const d = String(r?.data_lancamento ?? "").slice(0, 10);
+    s.add(`${d}|${(Math.round(Math.abs(v) * 100) / 100).toFixed(2)}`);
+  }
+  return s;
+}
+function _sobreposicao(aRows: { data_lancamento?: string | null; valor?: number | null }[],
+                      bRows: { data_lancamento?: string | null; valor?: number | null }[]): number {
+  const a = _assinLanc(aRows), b = _assinLanc(bRows);
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  return inter / Math.min(a.size, b.size);
+}
+
 const SCHEMA = {
   type: "object",
   additionalProperties: false,
@@ -473,14 +496,22 @@ Deno.serve(async (req) => {
       .eq("empresa_id", doc.empresa_id).eq("extrato_chave", chaveDedup)
       .is("duplicata_de", null).neq("id", documento_id).limit(1).maybeSingle();
     if (orig) {
-      await admin.from("lancamentos").delete().eq("documento_id", documento_id);
-      await admin.from("documentos").update({
-        status: "recebido", status_processamento: "duplicata", duplicata_de: orig.id,
-        extrato_chave: chaveDedup, lancamentos_gerados: 0, tipo: tipoFinal,
-        classificacao_ia: classificacao, dados_extraidos: classificacao,
-        processado_em: new Date().toISOString(),
-      }).eq("id", documento_id);
-      return json(200, { ok: true, duplicata: true, duplicata_de: orig.id, lancamentos_gerados: 0 });
+      // Só marca duplicata se as transações realmente se sobrepõem (senão é colisão
+      // de chave entre bancos distintos — segue e gera razão normal).
+      const { data: origLancs } = await admin.from("lancamentos")
+        .select("data_lancamento, valor").eq("documento_id", orig.id).eq("fonte_extrato", true);
+      const ov = _sobreposicao(classificacao.lancamentos_sugeridos ?? [], origLancs ?? []);
+      if ((origLancs?.length ?? 0) > 0 && ov >= OVERLAP_MIN_DEDUP) {
+        await admin.from("lancamentos").delete().eq("documento_id", documento_id);
+        await admin.from("documentos").update({
+          status: "recebido", status_processamento: "duplicata", duplicata_de: orig.id,
+          extrato_chave: chaveDedup, lancamentos_gerados: 0, tipo: tipoFinal,
+          classificacao_ia: classificacao, dados_extraidos: classificacao,
+          processado_em: new Date().toISOString(),
+        }).eq("id", documento_id);
+        return json(200, { ok: true, duplicata: true, duplicata_de: orig.id, lancamentos_gerados: 0 });
+      }
+      console.log(`dedup: chave ${chaveDedup} coincide com '${orig.arquivo_nome}' mas sobreposição ${Math.round(ov * 100)}% (orig ${origLancs?.length ?? 0} lanç.) — tratando como extrato próprio`);
     }
   }
 
