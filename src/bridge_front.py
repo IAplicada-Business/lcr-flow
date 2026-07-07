@@ -208,6 +208,41 @@ def _iso_data(yyyymmdd: str):
     return s or None
 
 
+# ── Sobreposição de transações (confirma dedup por identidade) ────────────────
+# A chave de dedup (agência|conta|mês) NÃO inclui o banco, então dois bancos com
+# mesma ag/conta/mês na mesma empresa colidiriam. Antes de marcar duplicata (e
+# deletar razão), exigimos que as transações realmente se sobreponham — mesmo
+# extrato tem sobreposição ~100%; colisão de chave tem ~0%.
+OVERLAP_MIN_DEDUP = 0.6  # fração mínima do MENOR conjunto p/ confirmar mesmo extrato
+
+def assin_transacoes(transacoes: list) -> set:
+    """Assinatura (data, valor) de transações cruas do parser (campos data/valor)."""
+    s = set()
+    for t in transacoes or []:
+        v = t.get("valor")
+        if v in (None, ""):
+            continue
+        s.add(((_iso_data(t.get("data")) or "")[:10], round(abs(float(v)), 2)))
+    return s
+
+def assin_lancamentos(lancs: list) -> set:
+    """Assinatura (data, valor) de lançamentos do banco (data_lancamento/valor)."""
+    s = set()
+    for l in lancs or []:
+        v = l.get("valor")
+        if v is None:
+            continue
+        s.add(((l.get("data_lancamento") or "")[:10], round(abs(float(v)), 2)))
+    return s
+
+def sobreposicao(a: set, b: set) -> float:
+    """Fração do MENOR conjunto que aparece no outro (0..1). Robusto a versões com
+    contagens diferentes (resumido ⊂ comentado). 0 se algum conjunto é vazio."""
+    if not a or not b:
+        return 0.0
+    return len(a & b) / min(len(a), len(b))
+
+
 _RE_COMPETENCIA_PREFIXO = re.compile(r"^\d{2}/\d{4}\s*")
 
 def _descricao_lancamento(linha: dict) -> str:
@@ -393,13 +428,24 @@ def processar_extrato(empresa_id, competencia, extrato_path, banco_cod, jwt, ori
     chave = chave_extrato(identidade, competencia)
     original = _buscar_original_extrato(empresa_id, chave, documento_id) if chave else None
     if original:
-        log(f"    DUPLICATA de '{original.get('arquivo_nome')}' (chave {chave}) → não gera razão")
-        sb_update("documentos", {"id": documento_id}, {
-            "status_processamento": "duplicata", "duplicata_de": original["id"],
-            "extrato_chave": chave, "lancamentos_gerados": 0,
-        })
-        return {"documento_id": documento_id, "lancamentos": 0, "transacoes": [],
-                "status": "duplicata", "duplicata_de": original["id"], "arquivo": extrato_path.name}
+        # Confirma que é o MESMO extrato (não só mesma chave): as transações precisam
+        # se sobrepor. Sem isto, dois bancos com mesma ag/conta/mês colidiriam na chave
+        # (o banco não entra nela) e o 2º seria marcado duplicata indevidamente. Só
+        # marca quando o original tem razão E a sobreposição confirma — senão processa
+        # normal (o backstop por sobreposição ainda cobre duplicata real não pega aqui).
+        orig_lancs = get_all("lancamentos", {"select": "data_lancamento,valor",
+                                             "documento_id": f"eq.{original['id']}", "fonte_extrato": "eq.true"})
+        ov = sobreposicao(assin_transacoes(transacoes), assin_lancamentos(orig_lancs))
+        if orig_lancs and ov >= OVERLAP_MIN_DEDUP:
+            log(f"    DUPLICATA de '{original.get('arquivo_nome')}' (chave {chave}, sobrep {ov:.0%}) → não gera razão")
+            sb_update("documentos", {"id": documento_id}, {
+                "status_processamento": "duplicata", "duplicata_de": original["id"],
+                "extrato_chave": chave, "lancamentos_gerados": 0,
+            })
+            return {"documento_id": documento_id, "lancamentos": 0, "transacoes": [],
+                    "status": "duplicata", "duplicata_de": original["id"], "arquivo": extrato_path.name}
+        log(f"    AVISO: chave {chave} coincide com '{original.get('arquivo_nome')}' mas sobreposição {ov:.0%} "
+            f"(orig {len(orig_lancs)} lanç.) — tratando como extrato próprio, gera razão")
 
     log(f"\n[3] Classificando com o motor IA (banco {banco_cod}, {comp_motor})...")
     resultado = classificar_extrato(transacoes, conta_banco=banco_cod, competencia=comp_motor)
