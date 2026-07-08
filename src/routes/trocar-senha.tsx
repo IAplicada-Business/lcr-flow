@@ -16,7 +16,7 @@ export const Route = createFileRoute("/trocar-senha")({
     if (error || !data.user) throw redirect({ to: "/auth" });
 
     const destino = await destinoPosAuth();
-    if (destino === "/app") throw redirect({ to: "/app" });
+    if (destino !== "/trocar-senha") throw redirect({ to: destino });
   },
   head: () => ({
     meta: [
@@ -36,7 +36,7 @@ function TrocarSenhaPage() {
 
   useEffect(() => {
     destinoPosAuth().then((to) => {
-      if (to === "/app") navigate({ to: "/app", replace: true });
+      if (to !== "/trocar-senha") navigate({ to, replace: true });
     });
   }, [navigate]);
 
@@ -68,7 +68,7 @@ function TrocarSenhaPage() {
 
     await queryClient.invalidateQueries({ queryKey: ["meu-perfil"] });
     toast.success("Senha atualizada. Bem-vindo(a)!");
-    navigate({ to: "/app", replace: true });
+    navigate({ to: await destinoPosAuth(), replace: true });
   }
 
   return (

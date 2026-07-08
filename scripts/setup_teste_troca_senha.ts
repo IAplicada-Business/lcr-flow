@@ -1,6 +1,10 @@
 /**
- * Provisiona email@exemplo.com e roda o teste de troca de senha.
+ * Provisiona email@exemplo.com para teste de troca de senha.
  * Requer no .env: SUPABASE_SERVICE_ROLE_KEY
+ *
+ * Uso:
+ *   bun run scripts/setup_teste_troca_senha.ts              # setup + teste API automático
+ *   bun run scripts/setup_teste_troca_senha.ts --so-setup   # só prepara para teste manual (prod/UI)
  */
 import { createClient } from "@supabase/supabase-js";
 import { readFileSync } from "node:fs";
@@ -79,9 +83,22 @@ async function ensureUser() {
   console.log("[OK] must_change_password = true");
 }
 
+const setupOnly =
+  process.argv.includes("--so-setup") ||
+  process.argv.includes("--setup-only") ||
+  process.argv.includes("--prod");
+
 async function main() {
   console.log("=== Setup usuário de teste ===\n");
   await ensureUser();
+
+  if (setupOnly) {
+    console.log("\n=== Pronto para teste manual (prod/UI) ===");
+    console.log("Email:", TEST_EMAIL);
+    console.log("Senha provisória:", TEMP_PASS);
+    console.log("Fluxo esperado: /auth → /trocar-senha → definir nova senha → /app");
+    return;
+  }
 
   console.log("\n=== Rodando teste de fluxo ===\n");
   const r = spawnSync(
