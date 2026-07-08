@@ -9,6 +9,7 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TrocarSenhaRouteImport } from './routes/trocar-senha'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as IndexRouteImport } from './routes/index'
@@ -33,6 +34,11 @@ import { Route as AuthenticatedConciliacaoEmpresaIdRouteImport } from './routes/
 import { Route as AuthenticatedClientesIdRouteImport } from './routes/_authenticated/clientes_.$id'
 import { Route as AuthenticatedKnowledgeProcessoCodigoRouteImport } from './routes/_authenticated/knowledge_.processo.$codigo'
 
+const TrocarSenhaRoute = TrocarSenhaRouteImport.update({
+  id: '/trocar-senha',
+  path: '/trocar-senha',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
@@ -160,6 +166,7 @@ const AuthenticatedKnowledgeProcessoCodigoRoute =
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/trocar-senha': typeof TrocarSenhaRoute
   '/app': typeof AuthenticatedAppRoute
   '/clientes': typeof AuthenticatedClientesRoute
   '/conciliacao': typeof AuthenticatedConciliacaoRoute
@@ -184,6 +191,7 @@ export interface FileRoutesByFullPath {
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/trocar-senha': typeof TrocarSenhaRoute
   '/app': typeof AuthenticatedAppRoute
   '/clientes': typeof AuthenticatedClientesRoute
   '/conciliacao': typeof AuthenticatedConciliacaoRoute
@@ -210,6 +218,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/trocar-senha': typeof TrocarSenhaRoute
   '/_authenticated/app': typeof AuthenticatedAppRoute
   '/_authenticated/clientes': typeof AuthenticatedClientesRoute
   '/_authenticated/conciliacao': typeof AuthenticatedConciliacaoRoute
@@ -236,6 +245,7 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/trocar-senha'
     | '/app'
     | '/clientes'
     | '/conciliacao'
@@ -260,6 +270,7 @@ export interface FileRouteTypes {
   to:
     | '/'
     | '/auth'
+    | '/trocar-senha'
     | '/app'
     | '/clientes'
     | '/conciliacao'
@@ -285,6 +296,7 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/trocar-senha'
     | '/_authenticated/app'
     | '/_authenticated/clientes'
     | '/_authenticated/conciliacao'
@@ -311,10 +323,18 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  TrocarSenhaRoute: typeof TrocarSenhaRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/trocar-senha': {
+      id: '/trocar-senha'
+      path: '/trocar-senha'
+      fullPath: '/trocar-senha'
+      preLoaderRoute: typeof TrocarSenhaRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth': {
       id: '/auth'
       path: '/auth'
@@ -534,6 +554,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  TrocarSenhaRoute: TrocarSenhaRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

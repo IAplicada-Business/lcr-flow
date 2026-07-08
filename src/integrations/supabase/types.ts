@@ -1655,6 +1655,7 @@ export type Database = {
           created_at: string
           email: string | null
           id: string
+          must_change_password: boolean
           nome: string
           perfil: Database["public"]["Enums"]["perfil_usuario"]
           permissoes_custom: string[] | null
@@ -1667,6 +1668,7 @@ export type Database = {
           created_at?: string
           email?: string | null
           id?: string
+          must_change_password?: boolean
           nome: string
           perfil?: Database["public"]["Enums"]["perfil_usuario"]
           permissoes_custom?: string[] | null
@@ -1679,6 +1681,7 @@ export type Database = {
           created_at?: string
           email?: string | null
           id?: string
+          must_change_password?: boolean
           nome?: string
           perfil?: Database["public"]["Enums"]["perfil_usuario"]
           permissoes_custom?: string[] | null
@@ -1727,6 +1730,7 @@ export type Database = {
         }[]
       }
       unaccent: { Args: { "": string }; Returns: string }
+      concluir_troca_senha: { Args: Record<PropertyKey, never>; Returns: undefined }
       update_meu_perfil: {
         Args: { p_avatar: string; p_nome: string }
         Returns: undefined

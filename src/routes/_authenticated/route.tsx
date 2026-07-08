@@ -4,12 +4,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { AppShell } from "@/components/app-shell";
 import { CerebroAssistant } from "@/components/CerebroAssistant";
 import { getMeuPerfil } from "@/lib/lcr.functions";
+import { exigeTrocaSenha } from "@/lib/auth-redirect";
 
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
   beforeLoad: async () => {
     const { data, error } = await supabase.auth.getUser();
     if (error || !data.user) throw redirect({ to: "/auth" });
+    if (await exigeTrocaSenha()) throw redirect({ to: "/trocar-senha" });
     return { user: data.user };
   },
   loader: ({ context }) =>

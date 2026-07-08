@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { trackAction } from "@/lib/logs.functions";
+import { destinoPosAuth } from "@/lib/auth-redirect";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -26,8 +27,8 @@ function AuthPage() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) navigate({ to: "/app", replace: true });
+    supabase.auth.getUser().then(async ({ data }) => {
+      if (data.user) navigate({ to: await destinoPosAuth(), replace: true });
     });
   }, [navigate]);
 
@@ -38,7 +39,7 @@ function AuthPage() {
     setLoading(false);
     if (error) return toast.error(error.message);
     void trackAction("login", { tela: "/auth" });
-    navigate({ to: "/app", replace: true });
+    navigate({ to: await destinoPosAuth(), replace: true });
   }
 
   return (

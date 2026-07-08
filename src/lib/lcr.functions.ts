@@ -1635,7 +1635,7 @@ export const getMeuPerfil = createServerFn({ method: "GET" })
   .handler(async ({ context }) => {
     const { data } = await context.supabase
       .from("usuarios_perfil")
-      .select("id, nome, email, perfil, permissoes_custom, avatar_url")
+      .select("id, nome, email, perfil, permissoes_custom, avatar_url, must_change_password")
       .eq("user_id", context.userId)
       .maybeSingle();
     if (!data) return null;

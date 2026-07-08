@@ -85,7 +85,10 @@ Deno.serve(async (req) => {
     // o trigger handle_new_user cria o perfil; garantimos nome/perfil/permissões
     const { error: upErr } = await admin
       .from("usuarios_perfil")
-      .upsert({ user_id: created.user.id, nome, email, perfil, permissoes_custom, ativo: true }, { onConflict: "user_id" });
+      .upsert(
+        { user_id: created.user.id, nome, email, perfil, permissoes_custom, ativo: true, must_change_password: true },
+        { onConflict: "user_id" },
+      );
     if (upErr) return fail(upErr.message);
 
     // Retorna a senha temporária para o admin repassar (login imediato por e-mail+senha).
@@ -141,6 +144,11 @@ Deno.serve(async (req) => {
     const { data: alvo } = await admin.from("usuarios_perfil").select("email").eq("user_id", user_id).maybeSingle();
     const { error } = await admin.auth.admin.updateUserById(user_id, { password: senha });
     if (error) return fail(error.message);
+    const { error: flagErr } = await admin
+      .from("usuarios_perfil")
+      .update({ must_change_password: true })
+      .eq("user_id", user_id);
+    if (flagErr) return fail(flagErr.message);
     return json(200, { ok: true, email: alvo?.email ?? "", senha_temporaria: senha });
   }
 
