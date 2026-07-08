@@ -59,10 +59,28 @@ function TrocarSenhaPage() {
       return;
     }
 
-    const { error: rpcErr } = await supabase.rpc("concluir_troca_senha");
+    // A senha no Auth já mudou — se a RPC falhar (rede, deploy, timeout), o usuário
+    // fica com flag must_change_password=true e acha que "a nova senha não funciona"
+    // porque tenta logar na /auth sem concluir o fluxo. Retentamos a RPC antes de desistir.
+    let rpcErr: { message: string } | null = null;
+    for (let tentativa = 0; tentativa < 3; tentativa++) {
+      const { error } = await supabase.rpc("concluir_troca_senha");
+      if (!error) {
+        rpcErr = null;
+        break;
+      }
+      rpcErr = error;
+      if (tentativa < 2) await new Promise((r) => setTimeout(r, 600));
+    }
+
     setLoading(false);
     if (rpcErr) {
-      toast.error(rpcErr.message);
+      toast.error(
+        "Sua senha foi alterada, mas o sistema não concluiu a liberação. Entre com a NOVA senha — se voltar à tela de troca, tente salvar de novo ou avise o administrador.",
+        { duration: 12_000 },
+      );
+      await supabase.auth.signOut();
+      navigate({ to: "/auth", replace: true });
       return;
     }
 
