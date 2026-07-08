@@ -1705,6 +1705,7 @@ export type Database = {
           total: number
         }[]
       }
+      concluir_troca_senha: { Args: never; Returns: undefined }
       documentos_competencias: {
         Args: never
         Returns: {
@@ -1730,7 +1731,6 @@ export type Database = {
         }[]
       }
       unaccent: { Args: { "": string }; Returns: string }
-      concluir_troca_senha: { Args: Record<PropertyKey, never>; Returns: undefined }
       update_meu_perfil: {
         Args: { p_avatar: string; p_nome: string }
         Returns: undefined
