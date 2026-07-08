@@ -221,9 +221,9 @@ def _lado_conta(tipo: str) -> str:
 
 def _fmt_data(data_str: str) -> str:
     try:
-        return datetime.strptime(str(data_str), "%Y-%m-%d").strftime("%Y%m%d")
+        return datetime.strptime(str(data_str), "%Y-%m-%d").strftime("%d/%m/%Y")
     except ValueError:
-        return str(data_str).replace("-", "")[:8]
+        return str(data_str)
 
 
 def gerar_planilha(
@@ -280,7 +280,7 @@ def gerar_planilha(
             credito = sci_conta
 
         linhas.append({
-            "DATA":                int(_fmt_data(lanc.get("data_lancamento") or "")),
+            "DATA":                _fmt_data(lanc.get("data_lancamento") or ""),
             "DEBITO":              debito,
             "CREDITO":             credito,
             "PART DEB":            "",
