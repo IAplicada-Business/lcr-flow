@@ -78,10 +78,17 @@ export function ladoPorValor(valor: number, tipoConta: string | null): "debito" 
   return ladoEfetivo({ valor, tipoConta });
 }
 
-function fmtData(d: string | null): number | string {
+function fmtDataSci(d: string | null): number | string {
   if (!d) return "";
   const m = String(d).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})/);
   return m ? Number(`${m[1]}${m[2]}${m[3]}`) : String(d).replace(/-/g, "").slice(0, 8);
+}
+
+/** Formato legível para a prévia na UI (DD/MM/AAAA). O .xls de importação SCI usa YYYYMMDD. */
+export function fmtDataPreview(d: string | null): string {
+  if (!d) return "";
+  const m = String(d).slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(d);
 }
 
 /** Monta as linhas do layout SCI (uma por lançamento com conta).
@@ -99,7 +106,7 @@ export function linhasSci(lancs: SciLanc[], bancoSci: number | string | "") {
       const debito = ld === "debito" ? conta : banco;
       const credito = ld === "debito" ? banco : conta;
       return {
-        "DATA": fmtData(l.data_lancamento),
+        "DATA": fmtDataSci(l.data_lancamento),
         "DÉBITO": debito,
         "CRÉDITO": credito,
         "PART DÉB": l.part_deb ?? "",
@@ -205,7 +212,7 @@ export function linhasSciPreview(
       const ld = ladoEfetivo({ natureza: l.natureza_movimento, valor, tipoConta: l.conta!.tipo });
       return {
         id: l.id,
-        data: fmtData(l.data_lancamento),
+        data: fmtDataPreview(l.data_lancamento),
         debito: ld === "debito" ? conta : banco,
         credito: ld === "debito" ? banco : conta,
         valor: Math.abs(valor),
