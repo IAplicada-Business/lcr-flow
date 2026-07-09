@@ -7,6 +7,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { StatusPill } from "@/components/status-pill";
 import { getDocumentoRevisao, aprovarDocumento, limparLancamentosDocumento, mudarTipoDocumento, desmarcarDuplicata } from "@/lib/lcr.functions";
 import { DOC_TIPO_LABEL, formatCompetencia } from "@/lib/format";
+import { DocumentoErroHint } from "@/components/documento-erro-hint";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { supabase } from "@/integrations/supabase/client";
 import { requireAcesso } from "@/lib/guard";
@@ -244,9 +245,7 @@ export function DocumentoRevisaoView({ documentoId, onAprovado }: { documentoId:
             </div>
             <CardContent className="space-y-3 pt-5 text-sm">
               {classificacao.error && (
-                <div className="flex items-center gap-2 rounded-lg bg-destructive/10 px-3 py-2 text-destructive">
-                  <AlertTriangle className="h-4 w-4" /> {classificacao.error}
-                </div>
+                <DocumentoErroHint classificacao_ia={classificacao} />
               )}
               <div className="grid grid-cols-2 gap-3">
                 <div>

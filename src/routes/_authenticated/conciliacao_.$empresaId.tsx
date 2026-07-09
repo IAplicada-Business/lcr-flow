@@ -14,6 +14,7 @@ import { StatusPill } from "@/components/status-pill";
 import { getConciliacaoDetalhe, listLancamentosConciliacao, conciliarParManual, editarLancamento, createLancamento, deleteLancamento, limparConciliacao, listPlanoContas, listDocumentos, enriquecerExtrato, listDocsSuporte } from "@/lib/lcr.functions";
 import { DOC_TIPO_LABEL } from "@/lib/format";
 import { formatCompetencia } from "@/lib/format";
+import { DocumentoErroHint } from "@/components/documento-erro-hint";
 import { supabase } from "@/integrations/supabase/client";
 import { requireAcesso } from "@/lib/guard";
 import { ChevronLeft, Download, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle, FileText, Link2, Pencil, ChevronsUpDown, Check, Plus, Trash2, ArrowUpFromLine } from "lucide-react";
@@ -215,7 +216,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
   // Só extrato conta aqui: docs contábeis (DARF, pro-labore, NFSe…) sem lançamento
   // pertencem à tela de Documentos, não à conciliação bancária.
   const { data: docsData } = useQuery({ queryKey: ["documentos"], queryFn: () => listDocumentos() });
-  const docsErro = ((docsData ?? []) as { id: string; competencia: string | null; status_processamento: string | null; arquivo_nome: string | null; tipo: string | null; empresa?: { id: string } | null }[])
+  const docsErro = ((docsData ?? []) as { id: string; competencia: string | null; status_processamento: string | null; arquivo_nome: string | null; tipo: string | null; classificacao_ia?: unknown; empresa?: { id: string } | null }[])
     .filter((d) => d.empresa?.id === empresaId && d.competencia === competencia && d.status_processamento === "erro" && d.tipo === "extrato");
 
   const conc = data?.conciliacao ?? null;
@@ -501,8 +502,16 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
           <p className="mt-1 text-sm text-amber-700">
             A IA não conseguiu extrair os lançamentos — a conciliação fica travada até tratar manualmente na aba <strong>Documentos</strong>:
           </p>
-          <ul className="mt-2 space-y-0.5 text-sm text-amber-800">
-            {docsErro.map((d) => <li key={d.id} className="font-mono text-xs">• {d.arquivo_nome ?? d.tipo ?? d.id}</li>)}
+          <ul className="mt-2 space-y-2 text-sm text-amber-800">
+            {docsErro.map((d) => (
+              <li key={d.id} className="rounded-lg border border-amber-200 bg-white/60 px-3 py-2">
+                <div className="font-mono text-xs">{d.arquivo_nome ?? d.tipo ?? d.id}</div>
+                <DocumentoErroHint classificacao_ia={d.classificacao_ia} compact className="mt-1" />
+                <Link to="/revisar/$documentoId" params={{ documentoId: d.id }} className="mt-1 inline-block text-xs font-medium text-primary hover:underline">
+                  Ver detalhes →
+                </Link>
+              </li>
+            ))}
           </ul>
         </div>
       )}

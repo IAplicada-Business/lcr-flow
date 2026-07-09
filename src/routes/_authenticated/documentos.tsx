@@ -14,6 +14,8 @@ import { Plus, Download, Sparkles, Eye, Loader2, ClipboardCheck, ChevronLeft, Ch
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { listEmpresas, createDocumento, setDocumentoStatus, ensureCompetencia, getDocumentosResumo, listDocumentosPaginado, getDocumentosCompetencias } from "@/lib/lcr.functions";
 import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
+import { documentoComErroProcessamento } from "@/lib/documento-erros";
+import { DocumentoErroHint } from "@/components/documento-erro-hint";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { requireAcesso } from "@/lib/guard";
@@ -182,10 +184,19 @@ function DocsPage() {
                 <TableCell className="text-xs uppercase text-muted-foreground">{d.origem}</TableCell>
                 <TableCell className="text-xs text-muted-foreground">{new Date(d.recebido_em).toLocaleDateString("pt-BR")}</TableCell>
                 <TableCell>
-                  <span className="flex items-center gap-1.5">
-                    {d.duplicata_de && <StatusPill variant="back">Duplicata</StatusPill>}
-                    <StatusPill variant={variantFor(d.status)}>{DOC_STATUS_LABEL[d.status]}</StatusPill>
-                  </span>
+                  <div className="space-y-1">
+                    <span className="flex items-center gap-1.5">
+                      {d.duplicata_de && <StatusPill variant="back">Duplicata</StatusPill>}
+                      {documentoComErroProcessamento(d) ? (
+                        <StatusPill variant="back">Erro IA</StatusPill>
+                      ) : (
+                        <StatusPill variant={variantFor(d.status)}>{DOC_STATUS_LABEL[d.status]}</StatusPill>
+                      )}
+                    </span>
+                    {documentoComErroProcessamento(d) && (
+                      <DocumentoErroHint classificacao_ia={d.classificacao_ia} compact />
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center justify-end gap-2">
@@ -194,8 +205,8 @@ function DocsPage() {
                         <Eye className="h-4 w-4" />
                       </Button>
                     )}
-                    {(d.status_processamento === "classificado" || d.status_processamento === "revisado" || d.duplicata_de) && (
-                      <Button variant="ghost" size="sm" asChild title={d.duplicata_de ? "Ver duplicata" : "Revisar classificação da IA"}>
+                    {(d.status_processamento === "classificado" || d.status_processamento === "revisado" || d.status_processamento === "erro" || d.duplicata_de) && (
+                      <Button variant="ghost" size="sm" asChild title={d.duplicata_de ? "Ver duplicata" : documentoComErroProcessamento(d) ? "Ver falha de processamento" : "Revisar classificação da IA"}>
                         <Link to="/revisar/$documentoId" params={{ documentoId: d.id }}><ClipboardCheck className="h-4 w-4" /></Link>
                       </Button>
                     )}

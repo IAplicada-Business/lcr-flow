@@ -15,8 +15,10 @@ import { Markdown } from "@/components/markdown";
 import { listDocumentos, gerarPlanilhaSci, getHistoricoCerebro, createDocumento, ensureCompetencia, listLancamentosConciliacao, getEmpresa, listPlanoContas, editarLancamento, type SciLinha } from "@/lib/lcr.functions";
 import { baixarPlanilhaSciXls, bancoCodigoDe, linhasSciPreview, validarLancamentosSci, type SciCelula } from "@/lib/sci-xls";
 import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
+import { documentoComErroProcessamento } from "@/lib/documento-erros";
+import { DocumentoErroHint } from "@/components/documento-erro-hint";
 import { supabase } from "@/integrations/supabase/client";
-import { Sparkles, Loader2, ClipboardCheck, Download, FileSpreadsheet, X, Plus, Eye, ChevronRight } from "lucide-react";
+import { Sparkles, Loader2, ClipboardCheck, Download, FileSpreadsheet, X, Plus, Eye, ChevronRight, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { DocumentoRevisaoView } from "@/routes/_authenticated/revisar.$documentoId";
 
@@ -101,19 +103,29 @@ export function DocumentosTab({ empresaId, competencia }: { empresaId: string; c
                 <TableCell className="text-sm">{formatCompetencia(d.competencia)}</TableCell>
                 <TableCell className="text-xs uppercase text-muted-foreground">{d.origem}</TableCell>
                 <TableCell>
-                  <span className="flex items-center gap-1.5">
-                    {d.duplicata_de && <StatusPill variant="back">Duplicata</StatusPill>}
-                    <StatusPill variant={variantFor(d.status)}>{DOC_STATUS_LABEL[d.status]}</StatusPill>
-                  </span>
+                  <div className="space-y-1">
+                    <span className="flex items-center gap-1.5">
+                      {d.duplicata_de && <StatusPill variant="back">Duplicata</StatusPill>}
+                      {documentoComErroProcessamento(d) ? (
+                        <StatusPill variant="back">Erro IA</StatusPill>
+                      ) : (
+                        <StatusPill variant={variantFor(d.status)}>{DOC_STATUS_LABEL[d.status]}</StatusPill>
+                      )}
+                    </span>
+                    {documentoComErroProcessamento(d) && (
+                      <DocumentoErroHint classificacao_ia={d.classificacao_ia} compact />
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center justify-end gap-2">
                     {d.arquivo_url && (() => {
                       const classificado = d.status_processamento === "classificado" || d.status_processamento === "revisado";
+                      const comErro = documentoComErroProcessamento(d);
                       return (
-                        <Button variant={aberto === d.id ? "default" : "outline"} size="sm" onClick={() => setAberto(aberto === d.id ? null : d.id)} title={classificado ? "Ver documento + análise da IA" : "Ver documento"}>
-                          {classificado ? <ClipboardCheck className="mr-1 h-4 w-4" /> : <Eye className="mr-1 h-4 w-4" />}
-                          {aberto === d.id ? "Fechar" : classificado ? "Revisar" : "Ver"}
+                        <Button variant={aberto === d.id ? "default" : "outline"} size="sm" onClick={() => setAberto(aberto === d.id ? null : d.id)} title={comErro ? "Ver falha de processamento" : classificado ? "Ver documento + análise da IA" : "Ver documento"}>
+                          {comErro ? <AlertTriangle className="mr-1 h-4 w-4" /> : classificado ? <ClipboardCheck className="mr-1 h-4 w-4" /> : <Eye className="mr-1 h-4 w-4" />}
+                          {aberto === d.id ? "Fechar" : comErro ? "Ver erro" : classificado ? "Revisar" : "Ver"}
                         </Button>
                       );
                     })()}

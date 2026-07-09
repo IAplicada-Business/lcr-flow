@@ -18,3 +18,14 @@ Deno.test("normalizarClassificacao garante lancamentos_sugeridos array", () => {
   const r = normalizarClassificacao({ tipo_documento: "outro" });
   assertEquals(r.lancamentos_sugeridos, []);
 });
+
+Deno.test("parseClassificacaoResposta recupera lancamentos de JSON truncado", () => {
+  const t = `{"tipo_documento":"extrato_bancario","competencia":"2026-02","lancamentos_sugeridos":[
+    {"data_lancamento":"2026-02-01","valor":100,"tipo_movimento":"debito","conta_codigo":"160","historico_codigo":"267","descricao":"PIX","confidence":0.9},
+    {"data_lancamento":"2026-02-02","valor":200,"tipo_movimento":"credito","conta_codigo":"7","historico_codigo":"7","descricao":"TED","confidence":0.8},
+    {"data_lancamento":"2026-02-03","valor":50,"tipo_movimento":"debito","conta_codigo":"160","historico_codigo":"267","descricao":"incompleto`;
+  const r = parseClassificacaoResposta(t, { allowTruncated: true });
+  assertEquals(r.tipo_documento, "extrato_bancario");
+  assertEquals(r.lancamentos_sugeridos.length, 2);
+  assertEquals(r.lancamentos_sugeridos[0].valor, 100);
+});

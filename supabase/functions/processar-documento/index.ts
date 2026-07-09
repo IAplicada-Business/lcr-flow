@@ -17,9 +17,26 @@ const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 const fail = (error: string) => json(200, { ok: false, error });
 
+function classificarErroDocumento(msg: string): { error_code: string; error_acao: string } {
+  const m = msg.toLowerCase();
+  if (m.includes("password protected")) return { error_code: "PDF_SENHA", error_acao: "Peça ao cliente reenviar o PDF sem senha." };
+  if (m.includes("base64") && m.includes("pdf")) return { error_code: "PDF_INVALIDO", error_acao: "Peça ao cliente reenviar o PDF ou exportar como imagem." };
+  if (m.includes("workbook is encrypted")) return { error_code: "EXCEL_CRIPTOGRAFADO", error_acao: "Peça ao cliente reenviar a planilha sem senha ou em CSV." };
+  if (m.includes("can't find workbook") || m.includes("ole2")) return { error_code: "EXCEL_CORROMPIDO", error_acao: "Peça ao cliente reenviar em CSV ou PDF." };
+  if (m.includes("hist_sci_codigo_fkey")) return { error_code: "HISTORICO_INVALIDO", error_acao: "Reprocesse após validar o histórico no plano SCI." };
+  if (m.includes("foreign key")) return { error_code: "HISTORICO_INVALIDO", error_acao: "Reprocesse ou corrija conta/histórico na revisão." };
+  if (m.includes("json") && (m.includes("válido") || m.includes("valido"))) return { error_code: "JSON_TRUNCADO", error_acao: "Reprocesse o documento." };
+  if (m.includes("não suportado") || m.includes("nao suportado")) return { error_code: "TIPO_NAO_SUPORTADO", error_acao: "Use PDF, imagem, CSV ou XML." };
+  if (m.includes("sem arquivo") || m.includes("falha ao baixar")) return { error_code: "ARQUIVO_AUSENTE", error_acao: "Reenvie o documento." };
+  if (/claude api|rate_limit|529|overloaded/i.test(m)) return { error_code: "IA_FALHA", error_acao: "Tente reprocessar em alguns minutos." };
+  return { error_code: "DESCONHECIDO", error_acao: "Revise o arquivo ou reenvie pelo cliente." };
+}
+
 // Haiku 4.5: limite de tokens/min bem maior que o Sonnet no mesmo tier (evita o
 // rate_limit_error de 10k tokens/min) + mais barato e rápido p/ classificar docs.
 const MODEL = "claude-haiku-4-5";
+// Haiku 4.5 suporta até 64k output; extratos grandes estouravam JSON em 8192 (~linha 600).
+const MAX_OUTPUT_TOKENS = 32768;
 
 // Subconjunto curado de contas/históricos enviado como contexto (em vez das 1187
 // contas + 559 históricos) p/ caber no limite de 10k tokens input/min. Fonte:
@@ -243,7 +260,12 @@ Deno.serve(async (req) => {
   await admin.from("documentos").update({ status_processamento: "processando" }).eq("id", documento_id);
 
   const markErro = async (msg: string) => {
-    await admin.from("documentos").update({ status_processamento: "erro", classificacao_ia: { error: msg } }).eq("id", documento_id);
+    const cat = classificarErroDocumento(msg);
+    await admin.from("documentos").update({
+      status: "erro",
+      status_processamento: "erro",
+      classificacao_ia: { error: msg, error_code: cat.error_code, error_acao: cat.error_acao, error_detail: msg },
+    }).eq("id", documento_id);
     return fail(msg);
   };
 
@@ -313,7 +335,7 @@ Deno.serve(async (req) => {
   try {
     const reqBody = JSON.stringify({
       model: MODEL,
-      max_tokens: 8192,
+      max_tokens: MAX_OUTPUT_TOKENS,
       system: SYSTEM_PROMPT,
       messages: [{
         role: "user",
@@ -355,11 +377,21 @@ Deno.serve(async (req) => {
     const dataApi = await apiResp.json();
     if (dataApi.stop_reason === "refusal") return markErro("A IA recusou processar este documento.");
     const tb = (dataApi.content ?? []).find((b: { type: string }) => b.type === "text");
+    const rawText = String(tb?.text ?? "{}");
+    const truncado = dataApi.stop_reason === "max_tokens";
     try {
-      classificacao = parseClassificacaoResposta(tb?.text ?? "{}");
+      classificacao = parseClassificacaoResposta(rawText, { allowTruncated: truncado });
     } catch (parseErr) {
-      const preview = String(tb?.text ?? "").slice(0, 200);
-      return markErro(`Resposta da IA não é JSON válido: ${parseErr instanceof Error ? parseErr.message : String(parseErr)} — início: ${preview}`);
+      try {
+        classificacao = parseClassificacaoResposta(rawText, { allowTruncated: true });
+        console.log(`json reparado após parse error: ${classificacao.lancamentos_sugeridos.length} lançamento(s)`);
+      } catch {
+        const preview = rawText.slice(0, 200);
+        return markErro(`Resposta da IA não é JSON válido: ${parseErr instanceof Error ? parseErr.message : String(parseErr)} — início: ${preview}`);
+      }
+    }
+    if (truncado) {
+      console.warn(`stop_reason=max_tokens — ${classificacao.lancamentos_sugeridos.length} lançamento(s) na resposta`);
     }
   } catch (e) {
     return markErro(`Falha na Claude API: ${e instanceof Error ? e.message : String(e)}`);
@@ -564,7 +596,31 @@ Deno.serve(async (req) => {
 
   let lancCriados = 0;
   if (rowsJanela.length) {
-    const { error: insErr, count } = await admin.from("lancamentos").insert(rowsJanela, { count: "exact" });
+    // Valida FK hist_sci_codigo / pdc_codigo antes do insert (IA pode sugerir código inexistente).
+    const histSciCods = [...new Set(rowsJanela.map((r) => r.hist_sci_codigo).filter((n): n is number => n != null))];
+    const pdcCods = [...new Set(rowsJanela.map((r) => r.pdc_codigo).filter((n): n is number => n != null))];
+    const [{ data: histSciValid }, { data: pdcValid }] = await Promise.all([
+      histSciCods.length ? admin.from("historicos_sci_lcr").select("codigo").in("codigo", histSciCods) : Promise.resolve({ data: [] as { codigo: number }[] }),
+      pdcCods.length ? admin.from("plano_de_contas_lcr").select("codigo, historico_padrao").in("codigo", pdcCods) : Promise.resolve({ data: [] as { codigo: number; historico_padrao: number | null }[] }),
+    ]);
+    const histSciOk = new Set((histSciValid ?? []).map((h) => h.codigo));
+    const pdcFallback = new Map((pdcValid ?? []).map((p) => [p.codigo, p.historico_padrao]));
+    const pdcOk = new Set((pdcValid ?? []).map((p) => p.codigo));
+    let histInvalidos = 0;
+    const rowsSafe = rowsJanela.map((r) => {
+      let hist_sci_codigo = r.hist_sci_codigo;
+      let pdc_codigo = r.pdc_codigo;
+      if (pdc_codigo != null && !pdcOk.has(pdc_codigo)) pdc_codigo = null;
+      if (hist_sci_codigo != null && !histSciOk.has(hist_sci_codigo)) {
+        histInvalidos++;
+        const fb = pdc_codigo != null ? pdcFallback.get(pdc_codigo) : null;
+        hist_sci_codigo = fb && histSciOk.has(fb) ? fb : null;
+      }
+      return { ...r, pdc_codigo, hist_sci_codigo };
+    });
+    if (histInvalidos) console.log(`hist_sci inválido: ${histInvalidos} lançamento(s) — fallback ou null aplicado`);
+
+    const { error: insErr, count } = await admin.from("lancamentos").insert(rowsSafe, { count: "exact" });
     if (insErr) return markErro(`Falha ao inserir lançamentos do extrato: ${insErr.message}`);
     lancCriados = count ?? rowsJanela.length;
   }

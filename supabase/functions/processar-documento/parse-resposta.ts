@@ -59,7 +59,8 @@ export const FORMATO_RESPOSTA_JSON = `FORMATO DE RESPOSTA — responda APENAS co
   ],
   "observacoes": ""
 }
-Campos obrigatórios: tipo_documento, lancamentos_sugeridos (use [] se documento suporte).`;
+Campos obrigatórios: tipo_documento, lancamentos_sugeridos (use [] se documento suporte).
+COMPACTO: extratos/faturas com muitas linhas — liste TODOS os lançamentos; justificativa máx. 60 caracteres; omita participante se vazio.`;
 
 /** Remove fences markdown e extrai o primeiro objeto/array JSON do texto. */
 export function extrairJsonBruto(texto: string): string {
@@ -137,8 +138,112 @@ export function normalizarClassificacao(raw: unknown): ClassificacaoParsed {
   };
 }
 
-export function parseClassificacaoResposta(texto: string): ClassificacaoParsed {
+/** Extrai objetos JSON completos de um array truncado (ex.: lancamentos_sugeridos). */
+export function extrairObjetosCompletosArray(json: string, key: string): Record<string, unknown>[] {
+  const keyPat = `"${key}"`;
+  const idx = json.indexOf(keyPat);
+  if (idx < 0) return [];
+  const arrStart = json.indexOf("[", idx);
+  if (arrStart < 0) return [];
+
+  const objects: Record<string, unknown>[] = [];
+  let i = arrStart + 1;
+  while (i < json.length) {
+    while (i < json.length && /[\s,]/.test(json[i])) i++;
+    if (i >= json.length || json[i] === "]") break;
+    if (json[i] !== "{") break;
+
+    let depth = 0;
+    const start = i;
+    let inString = false;
+    let escape = false;
+    for (; i < json.length; i++) {
+      const c = json[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (c === "\\" && inString) {
+        escape = true;
+        continue;
+      }
+      if (c === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (c === "{") depth++;
+      else if (c === "}") {
+        depth--;
+        if (depth === 0) {
+          try {
+            objects.push(JSON.parse(json.slice(start, i + 1)) as Record<string, unknown>);
+          } catch {
+            return objects;
+          }
+          i++;
+          break;
+        }
+      }
+    }
+    if (depth !== 0) break;
+  }
+  return objects;
+}
+
+function extrairCampoString(json: string, key: string): string | undefined {
+  const m = json.match(new RegExp(`"${key}"\\s*:\\s*"([^"]*)"`));
+  return m?.[1];
+}
+
+/** Tenta fechar JSON cortado no meio (sufixos comuns) antes de extrair array parcial. */
+export function repararJsonTruncado(bruto: string): string | null {
+  const t = bruto.trim();
+  if (!t) return null;
+  const sufixos = ["]}", "}", '"]}', '"}]', "null]}", '""]}'];
+  for (const suf of sufixos) {
+    try {
+      JSON.parse(t + suf);
+      return t + suf;
+    } catch {
+      /* próximo */
+    }
+  }
+  return null;
+}
+
+export type ParseClassificacaoOpts = { allowTruncated?: boolean };
+
+export function parseClassificacaoResposta(texto: string, opts?: ParseClassificacaoOpts): ClassificacaoParsed {
   const bruto = extrairJsonBruto(texto);
-  const parsed = JSON.parse(bruto);
-  return normalizarClassificacao(parsed);
+  try {
+    return normalizarClassificacao(JSON.parse(bruto));
+  } catch (firstErr) {
+    if (!opts?.allowTruncated) throw firstErr;
+
+    const reparado = repararJsonTruncado(bruto);
+    if (reparado) {
+      try {
+        return normalizarClassificacao(JSON.parse(reparado));
+      } catch {
+        /* fallback parcial */
+      }
+    }
+
+    const parcial = extrairObjetosCompletosArray(bruto, "lancamentos_sugeridos");
+    if (parcial.length === 0) throw firstErr;
+
+    const obs = extrairCampoString(bruto, "observacoes");
+    return normalizarClassificacao({
+      tipo_documento: extrairCampoString(bruto, "tipo_documento") ?? "outro",
+      competencia: extrairCampoString(bruto, "competencia"),
+      agencia: extrairCampoString(bruto, "agencia"),
+      conta: extrairCampoString(bruto, "conta"),
+      dados_extraidos: extrairCampoString(bruto, "dados_extraidos"),
+      lancamentos_sugeridos: parcial,
+      observacoes: obs
+        ? `${obs} | JSON truncado — ${parcial.length} lançamento(s) recuperados`
+        : `JSON truncado — ${parcial.length} lançamento(s) recuperados`,
+    });
+  }
 }
