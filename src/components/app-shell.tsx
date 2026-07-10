@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { updateMeuPerfil, getNotificacoes } from "@/lib/lcr.functions";
+import { trackAction } from "@/lib/logs.functions";
 import { toast } from "sonner";
 
 function Avatar({ url, nome, size = 36, className }: { url?: string | null; nome?: string; size?: number; className?: string }) {
@@ -346,6 +347,15 @@ export function AppShell({ children, userName, userRole, userAvatar, acessos }: 
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const tabAtual = useRouterState({ select: (s) => (s.location.search as { tab?: string }).tab });
   const [collapsed, setCollapsed] = useState(false);
+
+  // Trilha de navegação: cada troca de tela vira evento em logs_uso —
+  // alimenta a análise de acessos/tempo por tela em /gestao/logs.
+  useEffect(() => {
+    const clienteId = /^\/(clientes|conciliacao|consultive|cx)\//.test(pathname)
+      ? pathname.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] ?? null
+      : null;
+    void trackAction(clienteId ? "viu_cliente" : "acessou_tela", { clienteId, tela: pathname });
+  }, [pathname]);
 
   // filtra itens conforme acessos; grupos somem se não sobrar sub-item
   const itens: NavItem[] = NAV.flatMap<NavItem>((it) => {
