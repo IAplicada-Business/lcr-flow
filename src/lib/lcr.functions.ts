@@ -1042,9 +1042,10 @@ export const conciliarParManual = createServerFn({ method: "POST" })
     r.divergencias_extrato = (r.divergencias_extrato ?? []).filter((_, i) => i !== data.extrato_idx);
     r.conciliados_count = r.conciliados.length;
     const divergencias_count = (r.divergencias_razao?.length ?? 0) + (r.divergencias_extrato?.length ?? 0);
-    const status = divergencias_count === 0 ? "concluida" : "divergencias";
+    // Fluxo v2: zerar divergências habilita "Conciliar" — não finaliza automaticamente.
+    const status = divergencias_count === 0 ? "em_andamento" : "divergencias";
     const { error: upErr } = await context.supabase.from("conciliacoes")
-      .update({ resultado: r as never, divergencias_count, status, concluido_em: divergencias_count === 0 ? new Date().toISOString() : null })
+      .update({ resultado: r as never, divergencias_count, status, concluido_em: null })
       .eq("id", data.conciliacao_id);
     if (upErr) throw new Error(upErr.message);
     return { ok: true, divergencias_count };

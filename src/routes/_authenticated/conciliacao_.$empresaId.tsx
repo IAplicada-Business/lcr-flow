@@ -11,13 +11,13 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { StatusPill } from "@/components/status-pill";
-import { getConciliacaoDetalhe, listLancamentosConciliacao, conciliarParManual, editarLancamento, createLancamento, deleteLancamento, limparConciliacao, listPlanoContas, listDocumentos, enriquecerExtrato, listDocsSuporte } from "@/lib/lcr.functions";
+import { getConciliacaoDetalhe, getEmpresa, listLancamentosConciliacao, conciliarParManual, editarLancamento, createLancamento, deleteLancamento, limparConciliacao, listPlanoContas, listDocumentos, enriquecerExtrato, listDocsSuporte } from "@/lib/lcr.functions";
 import { DOC_TIPO_LABEL } from "@/lib/format";
 import { formatCompetencia } from "@/lib/format";
 import { DocumentoErroHint } from "@/components/documento-erro-hint";
 import { supabase } from "@/integrations/supabase/client";
 import { requireAcesso } from "@/lib/guard";
-import { ChevronLeft, Download, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle, FileText, Link2, Pencil, ChevronsUpDown, Check, Plus, Trash2, ArrowUpFromLine } from "lucide-react";
+import { ChevronLeft, Download, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle, FileText, Link2, Pencil, ChevronsUpDown, Check, Plus, Trash2, ArrowUpFromLine, Info } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -31,6 +31,27 @@ export const Route = createFileRoute("/_authenticated/conciliacao_/$empresaId")(
 });
 
 const brl = (v: number) => v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+const FEBRABAN: Record<string, string> = {
+  itau: "341", itaú: "341", bradesco: "237", brasil: "001", bb: "001", caixa: "104",
+  santander: "033", inter: "077", sicoob: "756", sicredi: "748", nubank: "260",
+};
+
+function formatContaBancaria(contas: { banco: string | null; agencia: string | null; conta: string | null }[]): string | null {
+  const c = contas[0];
+  if (!c?.banco && !c?.conta) return null;
+  const bancoLower = (c.banco ?? "").toLowerCase();
+  const febr = Object.entries(FEBRABAN).find(([k]) => bancoLower.includes(k))?.[1];
+  const agConta = [c.agencia, c.conta].filter(Boolean).join("-");
+  if (febr && c.banco) return `${febr} - ${c.banco}${agConta ? ` ${agConta}` : ""}`;
+  return [c.banco, agConta].filter(Boolean).join(" · ") || null;
+}
+
+function formatDataBR(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso.length === 10 ? `${iso}T12:00:00` : iso);
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleDateString("pt-BR");
+}
 
 type Linha = { data: string | null; descricao: string; valor: number; id?: string };
 type Resultado = {
@@ -96,6 +117,13 @@ function statusLancamento(l: LancConc): { label: string; variant: Parameters<typ
   if (l.conciliado) return { label: "Conciliado", variant: "now" };
   if (precisaRevisao(l)) return { label: "Aguardando revisão", variant: "back" };
   return { label: "Aprovado", variant: "next" };
+}
+
+function statusExtrato(l: LancConc): { label: string; variant: Parameters<typeof StatusPill>[0]["variant"] } {
+  if (precisaRevisao(l)) return { label: "Aguardando revisão", variant: "back" };
+  if (l.enriquecido) return { label: "Com suporte", variant: "now" };
+  if (l.fonte_extrato) return { label: "Aguardando revisão", variant: "back" };
+  return { label: "Com suporte", variant: "now" };
 }
 
 // TAB "Razão contábil": lançamentos da IA da competência, com status por linha e
@@ -187,30 +215,36 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
   const qc = useQueryClient();
   const key = ["conciliacao-detalhe", empresaId, competencia];
   const { data } = useQuery({ queryKey: key, queryFn: () => getConciliacaoDetalhe({ data: { empresa_id: empresaId, competencia } }) });
-  const [busy, setBusy] = useState<"conciliar" | null>(null);
+  const { data: empresaData } = useQuery({ queryKey: ["empresa", empresaId], queryFn: () => getEmpresa({ data: { id: empresaId } }), staleTime: 60_000 });
+  const contaBancariaLabel = formatContaBancaria((empresaData?.contas_bancarias ?? []) as { banco: string | null; agencia: string | null; conta: string | null }[]);
+  const [busy, setBusy] = useState<"analisar" | "finalizar" | null>(null);
 
   // Todos os lançamentos extraídos da competência (compartilha cache com a Razão).
   const lancKey = ["lanc-conc", empresaId, competencia];
   const { data: lancData, isLoading: lancLoading } = useQuery({ queryKey: lancKey, queryFn: () => listLancamentosConciliacao({ data: { empresa_id: empresaId, competencia } }) });
   const lancs = (lancData?.lancamentos ?? []) as LancConc[];
+  const extratoLancs = lancs.filter((l) => l.fonte_extrato);
   const aRever = lancs.filter(precisaRevisao).length;
   const aprovados = lancs.length - aRever;
-
-  // Sub-abas internas (pedido Mariana 07/07): Lançamentos · Conciliação · Divergências.
-  const [subtab, setSubtab] = useState<"lancamentos" | "conciliacao" | "divergencias">("lancamentos");
+  // Sub-abas internas (v2): Lançamentos · Conciliação — divergências inline em Lançamentos.
+  const [subtab, setSubtab] = useState<"lancamentos" | "conciliacao">("lancamentos");
 
   // Trava de revisão (Rafa/Cleiton): não deixar conciliar com pendência. O
   // filtro "só a revisar" + o scroll levam o usuário direto pra tabela editável.
   const [soARevisar, setSoARevisar] = useState(false);
   const tabelaRef = useRef<HTMLDivElement>(null);
+  const divergenciasRef = useRef<HTMLDivElement>(null);
   function irParaRevisao() {
-    // A tabela editável vive na aba Lançamentos; volta pra ela antes de filtrar/rolar.
     setSubtab("lancamentos");
     setSoARevisar(true);
-    // A aba só monta o conteúdo após o commit — rAF único pode disparar antes; timeout curto.
     setTimeout(() => tabelaRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
   }
-  const visiveisLancs = soARevisar ? lancs.filter(precisaRevisao) : lancs;
+  function scrollParaDivergencias() {
+    setSubtab("lancamentos");
+    setTimeout(() => divergenciasRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 80);
+  }
+  const visiveisLancs = soARevisar ? extratoLancs.filter(precisaRevisao) : extratoLancs;
+  const semSuporteExtrato = extratoLancs.filter((l) => !l.enriquecido).length;
 
   // Extratos bancários que a IA NÃO conseguiu processar nesta competência.
   // Só extrato conta aqui: docs contábeis (DARF, pro-labore, NFSe…) sem lançamento
@@ -221,33 +255,42 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
 
   const conc = data?.conciliacao ?? null;
   const resultado = (conc?.resultado ?? null) as Resultado;
+  const divCount = (resultado?.divergencias_razao.length ?? 0) + (resultado?.divergencias_extrato.length ?? 0);
   const temExtrato = !!conc?.extrato_csv_url;
   const extratoInfo = (data as unknown as { extrato?: { id: string; arquivo_nome: string | null; recebido_em: string; saldo_inicial: number | null; saldo_final: number | null; movimentacao_debito?: number; movimentacao_credito?: number; movimentacao_liquida?: number } | null })?.extrato ?? null;
   const outrosLancs = (data as unknown as { outros_lancamentos?: number })?.outros_lancamentos ?? 0;
-  const outrosValorLiquido = (data as unknown as { outros_valor_liquido?: number })?.outros_valor_liquido ?? 0;
-  const outrosValorDebito = (data as unknown as { outros_valor_debito?: number })?.outros_valor_debito ?? 0;
-  const outrosValorCredito = (data as unknown as { outros_valor_credito?: number })?.outros_valor_credito ?? 0;
 
-  async function conciliar(): Promise<boolean> {
+  async function invalidarAnaliseAposEdicao() {
+    if (conc && resultado) {
+      await limparConciliacao({ data: { conciliacao_id: conc.id } });
+      await qc.invalidateQueries({ queryKey: key });
+      toast.info("Re-analise as divergências após a alteração.");
+    }
+  }
+
+  async function analisarDivergencias(): Promise<boolean> {
     if (!conc) return false;
-    // Trava obrigatória: recomputa pendências com dados FRESCOS do cache (uma
-    // edição inline seta confidence=1 e chama conciliar() logo após invalidar —
-    // o `aRever` do closure ainda estaria defasado). Só usa o closure no fallback.
     const fresh = qc.getQueryData<{ lancamentos: LancConc[] }>(lancKey);
     const pendentes = (fresh?.lancamentos ?? lancs).filter(precisaRevisao).length;
     if (pendentes > 0) {
-      toast.error(`Existem ${pendentes} lançamento(s) pendentes de revisão. Você precisa revisar antes de conciliar.`);
+      toast.error(`Existem ${pendentes} lançamento(s) pendentes de revisão. Revise antes de analisar.`);
       irParaRevisao();
       return false;
     }
-    setBusy("conciliar");
+    setBusy("analisar");
     try {
-      const { data: res, error } = await supabase.functions.invoke("conciliar", { body: { conciliacao_id: conc.id } });
+      const { data: res, error } = await supabase.functions.invoke("conciliar", { body: { conciliacao_id: conc.id, modo: "analisar" } });
       if (error) throw new Error(error.message);
-      if (res && res.ok === false) throw new Error(res.error ?? "Falha na conciliação");
+      if (res && res.ok === false) throw new Error(res.error ?? "Falha na análise");
       await qc.invalidateQueries({ queryKey: key });
       await qc.invalidateQueries({ queryKey: ["conciliacoes"] });
-      toast.success(`Conciliação concluída — ${res.conciliados} conciliados, ${res.divergencias_count} divergência(s).`);
+      const divs = res.divergencias_count ?? 0;
+      if (divs > 0) {
+        toast.warning(`Análise concluída — ${divs} divergência(s) encontrada(s). Arrume antes de conciliar.`);
+        scrollParaDivergencias();
+      } else {
+        toast.success(`Análise concluída — valores conferem. Clique em Conciliar para finalizar.`);
+      }
       return true;
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro");
@@ -257,12 +300,40 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
     }
   }
 
-  // Ação explícita do botão Conciliar: concilia e, se der certo, salta pra aba
-  // Conciliação ("clica no botãozinho → aparece a conciliação"). As reconciliações
-  // disparadas por edição/inclusão de lançamento usam conciliar() direto (sem trocar
-  // de aba, pra não tirar o usuário de onde ele está editando).
-  async function conciliarEShow() {
-    if (await conciliar()) setSubtab("conciliacao");
+  async function finalizarConciliacao(): Promise<boolean> {
+    if (!conc) return false;
+    const fresh = qc.getQueryData<{ lancamentos: LancConc[] }>(lancKey);
+    const pendentes = (fresh?.lancamentos ?? lancs).filter(precisaRevisao).length;
+    if (pendentes > 0) {
+      toast.error(`Existem ${pendentes} lançamento(s) pendentes de revisão.`);
+      irParaRevisao();
+      return false;
+    }
+    if (!resultado) {
+      toast.error("Analise as divergências antes de conciliar.");
+      return false;
+    }
+    if (divCount > 0) {
+      toast.error(`Existem ${divCount} divergência(s) pendentes. Resolva antes de conciliar.`);
+      scrollParaDivergencias();
+      return false;
+    }
+    setBusy("finalizar");
+    try {
+      const { data: res, error } = await supabase.functions.invoke("conciliar", { body: { conciliacao_id: conc.id, modo: "finalizar" } });
+      if (error) throw new Error(error.message);
+      if (res && res.ok === false) throw new Error(res.error ?? "Falha na conciliação");
+      await qc.invalidateQueries({ queryKey: key });
+      await qc.invalidateQueries({ queryKey: ["conciliacoes"] });
+      toast.success(`Conciliação finalizada — ${res.conciliados} conciliado(s).`);
+      setSubtab("conciliacao");
+      return true;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro");
+      return false;
+    } finally {
+      setBusy(null);
+    }
   }
 
   // seleção para pareamento manual + edição/inclusão de lançamento
@@ -308,8 +379,8 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
       } });
       setNovo(null);
       await qc.invalidateQueries({ queryKey: lancKey });
-      if (temExtrato) { toast.success("Lançamento incluído. Reconciliando…"); await conciliar(); }
-      else toast.success("Lançamento incluído.");
+      await invalidarAnaliseAposEdicao();
+      toast.success("Lançamento incluído.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro");
     } finally { setActing(false); }
@@ -321,8 +392,8 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
     try {
       await deleteLancamento({ data: { id } });
       await qc.invalidateQueries({ queryKey: lancKey });
-      if (temExtrato) { toast.success("Lançamento excluído. Reconciliando…"); await conciliar(); }
-      else toast.success("Lançamento excluído.");
+      await invalidarAnaliseAposEdicao();
+      toast.success("Lançamento excluído.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro");
     } finally { setActing(false); }
@@ -332,11 +403,12 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
     if (!conc || selRazao === null || selExtrato === null) return;
     setActing(true);
     try {
-      await conciliarParManual({ data: { conciliacao_id: conc.id, razao_idx: selRazao, extrato_idx: selExtrato } });
+      const res = await conciliarParManual({ data: { conciliacao_id: conc.id, razao_idx: selRazao, extrato_idx: selExtrato } });
       setSelRazao(null); setSelExtrato(null);
       await qc.invalidateQueries({ queryKey: key });
       await qc.invalidateQueries({ queryKey: ["conciliacoes"] });
-      toast.success("Par conciliado manualmente.");
+      if (res.divergencias_count === 0) toast.success("Todas as divergências resolvidas — clique em Conciliar para finalizar.");
+      else toast.success("Par conciliado manualmente.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro");
     } finally { setActing(false); }
@@ -358,23 +430,34 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
       setEdit(null);
       await qc.invalidateQueries({ queryKey: ["lanc-conc"] });
       await qc.invalidateQueries({ queryKey: ["documentos"] });
-      if (temExtrato) { toast.success("Lançamento atualizado. Reconciliando…"); await conciliar(); }
-      else toast.success("Lançamento atualizado.");
+      await invalidarAnaliseAposEdicao();
+      toast.success("Lançamento atualizado.");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro");
     } finally { setActing(false); }
   }
 
-  // Contagem de divergências (razão×extrato) p/ o badge da sub-aba Divergências.
-  const divCount = (resultado?.divergencias_razao.length ?? 0) + (resultado?.divergencias_extrato.length ?? 0);
+  const podeAnalisar = temExtrato && aRever === 0 && !busy;
+  const podeFinalizar = temExtrato && aRever === 0 && divCount === 0 && !!resultado && !busy;
 
   return (
     <>
       <Tabs value={subtab} onValueChange={(v) => setSubtab(v as typeof subtab)}>
-        <TabsList className="flex-wrap">
-          <TabsTrigger value="lancamentos">Lançamentos</TabsTrigger>
-          <TabsTrigger value="conciliacao">Conciliação</TabsTrigger>
-          <TabsTrigger value="divergencias">Divergências{divCount > 0 ? ` (${divCount})` : ""}</TabsTrigger>
+        <TabsList className="mb-1 h-auto w-full justify-start gap-8 rounded-none bg-transparent p-0 shadow-none">
+          <TabsTrigger
+            value="lancamentos"
+            className="inline-flex items-center gap-2 rounded-none border-0 bg-transparent px-0 py-2 text-sm font-semibold text-muted-foreground shadow-none transition-colors data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+          >
+            <span className={cn("h-2 w-2 shrink-0 rounded-full bg-primary", subtab !== "lancamentos" && "opacity-0")} aria-hidden />
+            Lançamentos
+          </TabsTrigger>
+          <TabsTrigger
+            value="conciliacao"
+            className="inline-flex items-center gap-2 rounded-none border-0 bg-transparent px-0 py-2 text-sm font-semibold text-muted-foreground shadow-none transition-colors data-[state=active]:bg-transparent data-[state=active]:text-primary data-[state=active]:shadow-none"
+          >
+            <span className={cn("h-2 w-2 shrink-0 rounded-full bg-primary", subtab !== "conciliacao" && "opacity-0")} aria-hidden />
+            Conciliação
+          </TabsTrigger>
         </TabsList>
 
         {/* ─────────── Aba Lançamentos: cards + tabela do extrato + docs suporte ─────────── */}
@@ -434,7 +517,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
               {temExtrato ? (extratoInfo?.arquivo_nome ?? "Extrato vinculado") : "Aguardando extração"}
             </div>
             <div className="mt-1 text-[11px] text-muted-foreground">
-              {temExtrato ? "Extraído via Gestta" : "Quando chegar, o conciliar libera"}
+              {temExtrato ? "Extraído via Gestta" : "Quando chegar, a análise libera"}
             </div>
             {temExtrato && conc?.extrato_csv_url && (
               <Button variant="ghost" size="sm" className="mt-2 h-7 px-2 text-[11px]" onClick={() => baixar(conc.extrato_csv_url!)}>
@@ -469,25 +552,26 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
               <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
                 <ListChecks className="h-4 w-4" />
               </div>
-              <Button size="sm" disabled={!temExtrato || busy === "conciliar" || aRever > 0} onClick={conciliarEShow} className="h-8"
-                title={aRever > 0 ? `${aRever} lançamento(s) pendentes de revisão — revise antes de conciliar` : (!temExtrato ? "Aguardando o extrato" : "Conciliar agora")}>
-                <Wand2 className="mr-1 h-3.5 w-3.5" />{busy === "conciliar" ? "Conciliando…" : "Conciliar"}
-              </Button>
+              <div className="flex flex-col items-end gap-1.5 sm:flex-row sm:items-center">
+                <Button size="sm" disabled={!podeAnalisar} onClick={analisarDivergencias} className="h-8 rounded-full"
+                  title={aRever > 0 ? `${aRever} lançamento(s) pendentes de revisão` : (!temExtrato ? "Aguardando o extrato" : "Cruzar razão × extrato")}>
+                  <Sparkles className="mr-1 h-3.5 w-3.5" />{busy === "analisar" ? "Analisando…" : "Analisar divergências"}
+                </Button>
+                <Button
+                  size="sm"
+                  variant={podeFinalizar ? "default" : "secondary"}
+                  disabled={!podeFinalizar}
+                  onClick={finalizarConciliacao}
+                  className={cn("h-8 rounded-full", !podeFinalizar && "bg-muted text-muted-foreground hover:bg-muted")}
+                  title={divCount > 0 ? `${divCount} divergência(s) pendentes` : (!resultado ? "Analise primeiro" : "Finalizar conciliação")}
+                >
+                  <Wand2 className="mr-1 h-3.5 w-3.5" />{busy === "finalizar" ? "Conciliando…" : "Conciliar"}
+                </Button>
+              </div>
             </div>
             <div className="mt-3 text-[11px] uppercase tracking-wider text-muted-foreground">Outros lançamentos</div>
-            <div className="font-display text-2xl leading-tight">
-              {outrosLancs.toLocaleString("pt-BR")}
-              {outrosLancs > 0 && outrosValorLiquido !== 0 && (
-                <span className={cn("ml-2 text-sm font-medium", outrosValorLiquido >= 0 ? "text-emerald-600" : "text-rose-600")}>
-                  {outrosValorLiquido >= 0 ? "+" : ""}{brl(outrosValorLiquido)}
-                </span>
-              )}
-            </div>
-            <div className="mt-1 text-[11px] text-muted-foreground">
-              {outrosLancs > 0
-                ? <>Manuais/NFs/recibos · ↑ {brl(outrosValorCredito)} · ↓ {brl(outrosValorDebito)}</>
-                : "Manuais, NFs, recibos (sem extrato)"}
-            </div>
+            <div className="font-display text-2xl leading-tight">{outrosLancs.toLocaleString("pt-BR")}</div>
+            <div className="mt-1 text-[11px] text-muted-foreground">Manuais, NFs e recibos fora do extrato</div>
           </CardContent>
         </Card>
       </div>
@@ -516,28 +600,20 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
         </div>
       )}
 
-      {/* Lançamentos do extrato — fonte única, com indicação de enriquecimento */}
+      {/* Lançamentos do extrato — apenas linhas originadas do extrato bancário */}
       <Card className="mb-6" ref={tabelaRef}>
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/40 px-6 py-3">
           <div className="flex items-center gap-2">
             <ListChecks className="h-4 w-4 text-primary" />
             <h3 className="font-display text-lg">Lançamentos do extrato</h3>
-            <span className="text-xs text-muted-foreground">· {lancs.length} linha(s) · {aprovados} aprovado(s)</span>
+            <span className="text-xs text-muted-foreground">· {extratoLancs.length} linha(s){soARevisar ? " · filtrando revisão" : ""}</span>
           </div>
           <div className="flex items-center gap-2">
-            <label className={cn("inline-flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-0.5 text-xs", aRever > 0 ? "bg-amber-100 font-medium text-amber-800 ring-1 ring-amber-300" : "text-muted-foreground")}>
-              <input type="checkbox" checked={soARevisar} onChange={(e) => setSoARevisar(e.target.checked)} className="h-3.5 w-3.5 cursor-pointer accent-[var(--color-primary)]" />
-              Filtrar apenas a revisar{aRever > 0 ? ` (${aRever})` : ""}
-            </label>
-            {(() => {
-              const semSuporte = lancs.filter((l) => l.fonte_extrato && !l.enriquecido).length;
-              return semSuporte > 0 ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
-                  <AlertTriangle className="h-3 w-3" /> {semSuporte} sem documento suporte
-                </span>
-              ) : null;
-            })()}
-            <Button size="sm" variant="outline" disabled={acting} onClick={async () => {
+            {soARevisar && (
+              <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={() => setSoARevisar(false)}>Ver todos</Button>
+            )}
+            {semSuporteExtrato > 0 && (
+            <Button size="sm" variant="outline" disabled={acting} className="h-8" onClick={async () => {
               setActing(true);
               try {
                 const res = await enriquecerExtrato({ data: { empresa_id: empresaId, competencia, force: true } });
@@ -547,9 +623,9 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
                 toast.error(err instanceof Error ? err.message : "Erro");
               } finally { setActing(false); }
             }}>
-              <Sparkles className="mr-1 h-3.5 w-3.5" />Enriquecer
+              <Sparkles className="mr-1 h-3.5 w-3.5" />Enriquecer ({semSuporteExtrato})
             </Button>
-            <Button size="sm" onClick={() => abrirNovo()}><Plus className="mr-1 h-3.5 w-3.5" />Adicionar manual</Button>
+            )}
           </div>
         </div>
         <CardContent className="p-0">
@@ -569,24 +645,31 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
               <TableBody>
                 {visiveisLancs.map((l) => {
                   const alerta = precisaRevisao(l);
-                  const isExtrato = !!l.fonte_extrato;
-                  const semSuporte = isExtrato && !l.enriquecido;
-                  // Status visual: verde (enriquecido), amarelo (extrato sem suporte), default
+                  const semSuporte = !l.enriquecido;
                   const statusInfo = semSuporte
                     ? { label: "Sem documento suporte", variant: "back" as const }
                     : l.enriquecido
                       ? { label: "Com suporte", variant: "now" as const }
-                      : statusLancamento(l);
+                      : statusExtrato(l);
+                  const valorPositivo = (l.valor ?? 0) >= 0;
                   return (
                     <TableRow key={l.id} className={cn(alerta && "bg-amber-50", semSuporte && "bg-amber-50/60")}>
-                      <TableCell className="text-sm">{l.data_lancamento ? new Date(l.data_lancamento).toLocaleDateString("pt-BR") : "—"}</TableCell>
+                      <TableCell className="text-sm">{formatDataBR(l.data_lancamento)}</TableCell>
                       <TableCell className="text-sm">
-                        {l.conta ? <span className="font-mono text-xs">{l.conta.codigo}</span> : <span className="inline-flex items-center gap-1 text-xs text-amber-700"><AlertTriangle className="h-3 w-3" /> sem conta</span>}
-                        {l.conta && <div className="text-xs text-muted-foreground">{l.conta.descricao}</div>}
+                        {contaBancariaLabel ?? (l.conta ? (
+                          <>
+                            <span className="font-mono text-xs">{l.conta.codigo}</span>
+                            <div className="text-xs text-muted-foreground">{l.conta.descricao}</div>
+                          </>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs text-amber-700"><AlertTriangle className="h-3 w-3" /> sem conta</span>
+                        ))}
                       </TableCell>
                       <TableCell className="max-w-[18rem] truncate text-sm" title={l.descricao ?? ""}>
                         {l.descricao}
-                        {l.confidence != null && l.confidence < CONF_MIN_REVISAO && <span className="ml-1 text-[10px] text-amber-700">({Math.round(l.confidence * 100)}%)</span>}
+                        {l.confidence != null && l.confidence < CONF_MIN_REVISAO && (
+                          <span className="ml-1 text-[10px] text-amber-700">({Math.round(l.confidence * 100)}%)</span>
+                        )}
                       </TableCell>
                       <TableCell className="text-xs">
                         {(() => {
@@ -594,13 +677,17 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
                           return p ? (
                             <div className="flex items-center gap-1 max-w-[12rem]">
                               <span className="truncate font-medium text-foreground" title={p}>{p}</span>
-                              {l.part_aprendido && <span className="shrink-0 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-medium text-sky-700" title="Preenchido pelo aprendizado de participante — confira e edite se necessário">aprendido</span>}
+                              {l.part_aprendido && (
+                                <span className="shrink-0 rounded-full bg-sky-100 px-1.5 py-0.5 text-[9px] font-medium text-sky-700" title="Preenchido pelo aprendizado de participante — confira e edite se necessário">aprendido</span>
+                              )}
                             </div>
                           ) : <span className="text-muted-foreground">—</span>;
                         })()}
                         {l.documento_numero ? <div className="font-mono text-[10px] text-muted-foreground">NF {l.documento_numero}</div> : null}
                       </TableCell>
-                      <TableCell className="text-right font-mono text-sm">{l.valor == null ? "—" : brl(l.valor)}</TableCell>
+                      <TableCell className={cn("text-right font-mono text-sm", valorPositivo ? "text-emerald-600" : "text-foreground")}>
+                        {l.valor == null ? "—" : <>{valorPositivo ? "+" : ""}{brl(l.valor)}</>}
+                      </TableCell>
                       <TableCell><StatusPill variant={statusInfo.variant}>{statusInfo.label}</StatusPill></TableCell>
                       <TableCell className="text-right">
                         <div className="inline-flex items-center gap-1">
@@ -615,14 +702,49 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
                     </TableRow>
                   );
                 })}
-                {!lancLoading && soARevisar && lancs.length > 0 && visiveisLancs.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-emerald-700">Nada a revisar — todos os lançamentos foram aprovados. Já pode conciliar.</TableCell></TableRow>}
-                {!lancLoading && lancs.length === 0 && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Nenhum lançamento ainda. Cada linha do extrato bancário vira um lançamento aqui. Adicionar manual = lançamentos que não vêm do extrato (ex.: ajustes contábeis).</TableCell></TableRow>}
+                {!lancLoading && soARevisar && extratoLancs.length > 0 && visiveisLancs.length === 0 && (
+                  <TableRow><TableCell colSpan={7} className="py-8 text-center text-emerald-700">Nada a revisar no extrato — pode analisar divergências.</TableCell></TableRow>
+                )}
+                {!lancLoading && extratoLancs.length === 0 && (
+                  <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Nenhuma linha do extrato nesta competência. Quando o extrato for processado, as movimentações aparecem aqui.</TableCell></TableRow>
+                )}
                 {lancLoading && <TableRow><TableCell colSpan={7} className="py-8 text-center text-muted-foreground">Carregando…</TableCell></TableRow>}
               </TableBody>
             </Table>
           </div>
         </CardContent>
       </Card>
+
+      {/* Divergências inline (v2) — sempre visível quando há extrato */}
+      <div ref={divergenciasRef} className="mb-6">
+        {resultado && divCount === 0 && conc?.status !== "concluida" && (
+          <div className="mb-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3">
+            <div className="flex items-center gap-2 text-sm text-emerald-800">
+              <CheckCircle2 className="h-4 w-4 text-emerald-600" />
+              <span className="font-medium">Valores conferem — pronto para conciliar</span>
+            </div>
+          </div>
+        )}
+        {temExtrato && (
+          <DivergenciasPanel
+            divergenciasRazao={resultado?.divergencias_razao ?? []}
+            divergenciasExtrato={resultado?.divergencias_extrato ?? []}
+            divCount={divCount}
+            analisado={!!resultado}
+            revisaoPendente={aRever > 0}
+            selRazao={selRazao}
+            selExtrato={selExtrato}
+            acting={acting}
+            onSelRazao={(i) => setSelRazao(selRazao === i ? null : i)}
+            onSelExtrato={(i) => setSelExtrato(selExtrato === i ? null : i)}
+            onAbrirNovo={() => abrirNovo()}
+            onConciliarManual={conciliarManual}
+          />
+        )}
+        {resultado && divCount === 0 && conc?.status === "concluida" && (
+          <p className="mt-2 text-center text-sm text-emerald-700">Conciliação finalizada — nenhuma pendência.</p>
+        )}
+      </div>
 
       {/* Documentos suporte recebidos — sinalização de falta de suporte (A) fica aqui, não vira sub-aba */}
       <DocsSuporteCard empresaId={empresaId} competencia={competencia} />
@@ -658,20 +780,29 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
           {!resultado ? (
             <Card><CardContent className="py-10 text-center">
               {!temExtrato ? (
-                <span className="text-muted-foreground">Aguardando a extração do extrato no Gestta para conciliar.</span>
+                <span className="text-muted-foreground">Aguardando a extração do extrato no Gestta.</span>
               ) : aRever > 0 ? (
                 <div className="space-y-3">
-                  <p className="text-amber-800">{aRever} lançamento(s) pendentes de revisão. Revise antes de conciliar.</p>
+                  <p className="text-amber-800">{aRever} lançamento(s) pendentes de revisão. Revise antes de analisar.</p>
                   <Button variant="outline" onClick={irParaRevisao} className="border-amber-400 text-amber-800 hover:bg-amber-100">Ir para revisão</Button>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  <p className="text-muted-foreground">Pronto para conciliar — cruze a razão com o extrato desta competência.</p>
-                  <Button disabled={busy === "conciliar"} onClick={conciliarEShow}>
-                    <Wand2 className="mr-1 h-4 w-4" />{busy === "conciliar" ? "Conciliando…" : "Conciliar agora"}
+                  <p className="text-muted-foreground">Analise as divergências na aba Lançamentos antes de ver o resultado aqui.</p>
+                  <Button variant="outline" onClick={() => { setSubtab("lancamentos"); void analisarDivergencias(); }}>
+                    <Sparkles className="mr-1 h-4 w-4" />Analisar divergências
                   </Button>
                 </div>
               )}
+            </CardContent></Card>
+          ) : conc?.status !== "concluida" ? (
+            <Card><CardContent className="py-10 text-center space-y-3">
+              <p className="text-muted-foreground">
+                {divCount > 0
+                  ? `${divCount} divergência(s) pendente(s) — resolva na aba Lançamentos e clique em Conciliar.`
+                  : "Análise concluída — clique em Conciliar na aba Lançamentos para finalizar."}
+              </p>
+              <Button variant="outline" onClick={() => setSubtab("lancamentos")}>Ir para Lançamentos</Button>
             </CardContent></Card>
           ) : (
             <div className="space-y-5">
@@ -702,66 +833,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
                   </TableBody>
                 </Table>
               </Secao>
-
-              {divCount > 0 && (
-                <p className="text-sm text-muted-foreground">
-                  {divCount} divergência(s) razão × extrato — veja a aba <button type="button" className="font-medium text-primary underline underline-offset-2" onClick={() => setSubtab("divergencias")}>Divergências</button> para tratar.
-                </p>
-              )}
             </div>
-          )}
-        </TabsContent>
-
-        {/* ─────────── Aba Divergências: o que o motor NÃO casou (razão × extrato) ─────────── */}
-        <TabsContent value="divergencias" className="mt-4">
-          {!resultado ? (
-            <Card><CardContent className="py-10 text-center text-muted-foreground">
-              {temExtrato ? "Rode a conciliação (aba Conciliação) para ver as divergências." : "Aguardando a extração do extrato no Gestta."}
-            </CardContent></Card>
-          ) : divCount === 0 ? (
-            <Card><CardContent className="py-10 text-center text-emerald-700">
-              Nenhuma divergência — tudo bateu entre razão e extrato.
-            </CardContent></Card>
-          ) : (
-            <Card className="border-amber-200">
-              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-amber-50/60 px-6 py-3">
-                <div className="flex items-start gap-2">
-                  <AlertTriangle className="mt-1 h-4 w-4 shrink-0 text-amber-600" />
-                  <div>
-                    <h3 className="font-display text-lg leading-tight">O que não foi conciliado</h3>
-                    <p className="mt-0.5 text-xs text-muted-foreground">Cruza os lançamentos da razão com o extrato — por regras (valor + data ±3 dias) e, no que sobrar, por IA. O que resta aqui é ajuste manual.</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" onClick={() => abrirNovo()}><Plus className="mr-1 h-4 w-4" /> Adicionar manual</Button>
-                  <Button size="sm" disabled={acting || selRazao === null || selExtrato === null} onClick={conciliarManual}>
-                    <Link2 className="mr-1 h-4 w-4" /> Conciliar par selecionado
-                  </Button>
-                </div>
-              </div>
-              <CardContent className="grid grid-cols-1 gap-5 p-5 lg:grid-cols-2">
-                <DivergCol
-                  titulo="Na razão, sem par no extrato" linhas={resultado.divergencias_razao}
-                  sel={selRazao} onSel={(i) => setSelRazao(selRazao === i ? null : i)}
-                  onEdit={(l) => setEdit({ id: l.id ?? "", data: l.data ?? "", valor: String(l.valor ?? ""), descricao: l.descricao ?? "", conta_codigo: "", part_deb: "", part_cred: "" })}
-                  onDelete={(l) => l.id && excluirLancamento(l.id, l.descricao)}
-                  acting={acting}
-                />
-                <DivergCol
-                  titulo="No extrato, sem par na razão" linhas={resultado.divergencias_extrato}
-                  sel={selExtrato} onSel={(i) => setSelExtrato(selExtrato === i ? null : i)}
-                  onAdd={(l) => abrirNovo(l.descricao, l.valor, l.data ?? undefined)}
-                />
-              </CardContent>
-              <div className="px-6 pb-4 text-xs text-muted-foreground">
-                {resultado.divergencias_extrato.length === 0 && resultado.divergencias_razao.length > 0
-                  ? <>Sem contraparte no extrato. Use <strong>Editar</strong> para corrigir valor/data do lançamento, <strong>Excluir</strong> se ele não deveria existir, ou <strong>Adicionar manual</strong> se falta um lançamento do outro lado.</>
-                  : resultado.divergencias_razao.length === 0 && resultado.divergencias_extrato.length > 0
-                    ? <>Sem contraparte na razão. Use <strong>Adicionar manual</strong> em cada linha do extrato para criar o lançamento correspondente.</>
-                    : <>Selecione uma linha de cada lado e clique em <strong>Conciliar par selecionado</strong> para casar manualmente. Ou edite o lançamento da razão (botão Editar) para corrigir valor/data e reconciliar automaticamente.</>
-                }
-              </div>
-            </Card>
           )}
         </TabsContent>
       </Tabs>
@@ -821,48 +893,87 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
   );
 }
 
+// Painel inline de divergências (v2) — renderizado na aba Lançamentos.
+function DivergenciasPanel({ divergenciasRazao, divergenciasExtrato, divCount, analisado, revisaoPendente, selRazao, selExtrato, acting, onSelRazao, onSelExtrato, onAbrirNovo, onConciliarManual }: {
+  divergenciasRazao: Linha[];
+  divergenciasExtrato: Linha[];
+  divCount: number;
+  analisado: boolean;
+  revisaoPendente: boolean;
+  selRazao: number | null;
+  selExtrato: number | null;
+  acting: boolean;
+  onSelRazao: (i: number) => void;
+  onSelExtrato: (i: number) => void;
+  onAbrirNovo: () => void;
+  onConciliarManual: () => void;
+}) {
+  const vazio = divCount === 0;
+  const emptyHint = revisaoPendente
+    ? "Revise todos os lançamentos pendentes antes de analisar."
+    : !analisado
+      ? "Clique em Analisar divergências para cruzar razão × extrato."
+      : "Nenhum item sem par — valores conferem.";
+
+  return (
+    <Card className="overflow-hidden rounded-2xl border-2 border-amber-300 bg-[#fff8f0] shadow-none">
+      <div className="border-b border-amber-200/80 px-6 py-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <AlertTriangle className="h-4 w-4 shrink-0 text-amber-600" />
+          <h3 className="font-display text-lg leading-tight text-amber-950">O que não foi conciliado</h3>
+          {analisado && (
+            <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-semibold text-amber-800">{divCount} {divCount === 1 ? "item" : "itens"}</span>
+          )}
+        </div>
+        <p className="mt-1.5 text-sm text-amber-900/80">Arrume o que estiver divergindo antes de concluir</p>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 lg:divide-x lg:divide-amber-200/80">
+        <DivergCol
+          titulo="Na razão, sem par no extrato" linhas={divergenciasRazao}
+          sel={selRazao} onSel={onSelRazao} disabled={vazio || revisaoPendente}
+          emptyHint={emptyHint}
+        />
+        <DivergCol
+          titulo="No extrato, sem par na razão" linhas={divergenciasExtrato}
+          sel={selExtrato} onSel={onSelExtrato} disabled={vazio || revisaoPendente}
+          emptyHint={emptyHint}
+        />
+      </div>
+      <div className="flex flex-wrap items-center justify-end gap-2 border-t border-amber-200/80 bg-amber-50/60 px-6 py-3">
+        <Button size="sm" variant="outline" className="rounded-full border-primary/30 bg-white" onClick={onAbrirNovo} disabled={revisaoPendente}>
+          Adicionar manual
+        </Button>
+        <Button size="sm" className="rounded-full" disabled={acting || revisaoPendente || vazio || selRazao === null || selExtrato === null} onClick={onConciliarManual}>
+          Conciliar par selecionado
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 // Coluna de divergências com seleção (radio), edição/exclusão (lado da razão)
 // e botão "Incluir como lançamento" (lado do extrato).
-function DivergCol({ titulo, linhas, sel, onSel, onEdit, onDelete, onAdd, acting }: {
+function DivergCol({ titulo, linhas, sel, onSel, disabled, emptyHint }: {
   titulo: string; linhas: Linha[]; sel: number | null;
-  onSel: (i: number) => void; onEdit?: (l: Linha) => void;
-  onDelete?: (l: Linha) => void; onAdd?: (l: Linha) => void; acting?: boolean;
+  onSel: (i: number) => void; disabled?: boolean; emptyHint?: string;
 }) {
   return (
-    <div className="rounded-xl border border-border">
-      <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-4 py-2.5">
-        <h4 className="font-display text-sm">{titulo}</h4>
-        <span className="ml-auto text-xs text-muted-foreground">{linhas.length}</span>
-      </div>
-      <div className="max-h-72 divide-y divide-border overflow-y-auto">
+    <div className="px-5 py-4">
+      <h4 className="mb-3 font-display text-sm font-semibold text-primary">{titulo}</h4>
+      <div className="max-h-72 divide-y divide-amber-100 overflow-y-auto">
         {linhas.map((l, i) => (
-          <div key={i} className={cn("flex items-center gap-2 px-4 py-2.5 text-sm", sel === i && "bg-primary/10")}>
-            <input type="radio" checked={sel === i} onChange={() => onSel(i)} className="h-4 w-4 cursor-pointer accent-[var(--color-primary)]" />
-            <button type="button" onClick={() => onSel(i)} className="flex-1 min-w-0 text-left">
-              <div className="truncate" title={l.descricao}>{l.descricao}</div>
-              <div className="text-xs text-muted-foreground">{l.data ?? "—"}</div>
+          <div key={i} className={cn("flex items-center gap-3 py-2.5 text-sm", sel === i && "bg-primary/5 -mx-2 rounded-lg px-2")}>
+            <input type="radio" checked={sel === i} disabled={disabled} onChange={() => onSel(i)} className="h-4 w-4 shrink-0 cursor-pointer accent-[var(--color-primary)] disabled:cursor-not-allowed" />
+            <button type="button" disabled={disabled} onClick={() => onSel(i)} className="flex min-w-0 flex-1 items-center gap-3 text-left disabled:cursor-default">
+              <span className="shrink-0 tabular-nums text-xs text-muted-foreground">{formatDataBR(l.data)}</span>
+              <span className="truncate" title={l.descricao}>{l.descricao}</span>
             </button>
-            <span className={cn("font-mono text-sm shrink-0", l.valor < 0 ? "text-destructive" : "text-primary-hover")}>{brl(Math.abs(l.valor))}</span>
-            <div className="inline-flex items-center gap-0.5 shrink-0">
-              {onAdd && (
-                <button type="button" onClick={() => onAdd(l)} className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary" title="Incluir como lançamento">
-                  <Plus className="h-3.5 w-3.5" />
-                </button>
-              )}
-              {onEdit && l.id && (
-                <button type="button" onClick={() => onEdit(l)} className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground" title="Editar lançamento">
-                  <Pencil className="h-3.5 w-3.5" />
-                </button>
-              )}
-              {onDelete && l.id && (
-                <button type="button" disabled={acting} onClick={() => onDelete(l)} className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50" title="Excluir lançamento">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
+            <span className="shrink-0 font-mono text-sm text-foreground">{brl(l.valor)}</span>
           </div>
         ))}
-        {linhas.length === 0 && <div className="px-4 py-6 text-center text-xs text-muted-foreground">Sem divergências.</div>}
+        {linhas.length === 0 && (
+          <div className="py-8 text-center text-xs text-muted-foreground">{emptyHint ?? "Sem divergências."}</div>
+        )}
       </div>
     </div>
   );
@@ -911,7 +1022,6 @@ function DocsSuporteCard({ empresaId, competencia }: { empresaId: string; compet
     queryFn: () => listDocsSuporte({ data: { empresa_id: empresaId, competencia } }),
   });
   const lista = (docs ?? []) as Array<{ id: string; tipo: string; arquivo_nome: string | null; recebido_em: string; lancamento_match: { id: string; descricao: string | null; valor: number | null } | null }>;
-  if (lista.length === 0) return null;
   const orfaos = lista.filter((d) => !d.lancamento_match).length;
   return (
     <Card className="mb-6">
@@ -919,7 +1029,8 @@ function DocsSuporteCard({ empresaId, competencia }: { empresaId: string; compet
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-primary" />
           <h3 className="font-display text-lg">Documentos suporte recebidos</h3>
-          <span className="text-xs text-muted-foreground">· {lista.length} · {orfaos} sem match</span>
+          <Info className="h-3.5 w-3.5 text-muted-foreground" aria-label="Comprovantes vinculados às linhas do extrato" />
+          {lista.length > 0 && <span className="text-xs text-muted-foreground">· {lista.length}{orfaos > 0 ? ` · ${orfaos} sem match` : ""}</span>}
         </div>
         {orfaos > 0 && (
           <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700">
@@ -928,6 +1039,9 @@ function DocsSuporteCard({ empresaId, competencia }: { empresaId: string; compet
         )}
       </div>
       <CardContent className="p-0">
+        {lista.length === 0 ? (
+          <div className="px-6 py-8 text-center text-sm text-muted-foreground">Nenhum documento suporte recebido nesta competência.</div>
+        ) : (
         <Table>
           <TableHeader>
             <TableRow>
@@ -961,6 +1075,7 @@ function DocsSuporteCard({ empresaId, competencia }: { empresaId: string; compet
             ))}
           </TableBody>
         </Table>
+        )}
       </CardContent>
     </Card>
   );

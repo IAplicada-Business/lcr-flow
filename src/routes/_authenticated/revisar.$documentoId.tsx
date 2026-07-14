@@ -311,7 +311,7 @@ export function DocumentoRevisaoView({ documentoId, onAprovado }: { documentoId:
                     <p className="mt-1 text-sm text-soft-foreground">
                       Extratos bancários não geram lançamentos sugeridos aqui — eles entram diretamente como fonte de
                       comparação na <strong>Conciliação bancária</strong> da competência {formatCompetencia(doc.competencia)}.
-                      Clique em <strong>"Conciliar agora"</strong> lá para casar com a razão.
+                      Clique em <strong>"Analisar divergências"</strong> lá para cruzar com a razão.
                     </p>
                   </div>
                 </div>

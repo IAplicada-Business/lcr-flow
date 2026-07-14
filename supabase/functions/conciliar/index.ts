@@ -127,11 +127,12 @@ Deno.serve(async (req) => {
   const { data: userData, error: userErr } = await admin.auth.getUser(token);
   if (userErr || !userData.user) return json(401, { error: "Token inválido" });
 
-  let body: { conciliacao_id?: string; empresa_id?: string; competencia?: string };
+  let body: { conciliacao_id?: string; empresa_id?: string; competencia?: string; modo?: "analisar" | "finalizar" };
   try { body = await req.json(); } catch { return fail("JSON inválido"); }
+  const modo = body.modo === "finalizar" ? "finalizar" : "analisar";
 
   // localiza a conciliação
-  let q = admin.from("conciliacoes").select("id, empresa_id, competencia, extrato_csv_url");
+  let q = admin.from("conciliacoes").select("id, empresa_id, competencia, extrato_csv_url, resultado, divergencias_count");
   q = body.conciliacao_id
     ? q.eq("id", body.conciliacao_id)
     : q.eq("empresa_id", body.empresa_id ?? "").eq("competencia", body.competencia ?? "");
@@ -139,6 +140,26 @@ Deno.serve(async (req) => {
   if (cErr) return fail(cErr.message);
   if (!conc) return fail("Conciliação não encontrada.");
   if (!conc.extrato_csv_url) return fail("Importe o extrato bancário (CSV) antes de conciliar.");
+
+  // Finalização: exige análise prévia sem divergências abertas (fluxo v2).
+  if (modo === "finalizar") {
+    if (!conc.resultado) return fail("Analise as divergências antes de conciliar.");
+    const pend = conc.divergencias_count ?? 0;
+    if (pend > 0) return fail(`Existem ${pend} divergência(s) pendentes. Resolva antes de conciliar.`);
+    const r = conc.resultado as { conciliados_count?: number };
+    const { error: finErr } = await admin
+      .from("conciliacoes")
+      .update({ status: "concluida", concluido_em: new Date().toISOString() })
+      .eq("id", conc.id);
+    if (finErr) return fail(finErr.message);
+    return json(200, {
+      ok: true,
+      modo: "finalizar",
+      divergencias_count: 0,
+      conciliados: r.conciliados_count ?? 0,
+      status: "concluida",
+    });
+  }
 
   const anoFallback = parseInt((conc.competencia ?? "2026-01").slice(0, 4), 10) || 2026;
   const dl = async (path: string) => {
@@ -262,17 +283,18 @@ Deno.serve(async (req) => {
     divergencias_extrato,
   };
 
-  const novoStatus = divergencias_count === 0 ? "concluida" : "divergencias";
+  // Análise: grava resultado; conclusão só via modo "finalizar".
+  const novoStatus = divergencias_count === 0 ? "em_andamento" : "divergencias";
   const { error: upErr } = await admin
     .from("conciliacoes")
     .update({
       resultado,
       divergencias_count,
       status: novoStatus,
-      concluido_em: divergencias_count === 0 ? new Date().toISOString() : null,
+      concluido_em: null,
     })
     .eq("id", conc.id);
   if (upErr) return fail(upErr.message);
 
-  return json(200, { ok: true, divergencias_count, conciliados: conciliados.length, status: novoStatus });
+  return json(200, { ok: true, modo: "analisar", divergencias_count, conciliados: conciliados.length, status: novoStatus });
 });
