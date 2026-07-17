@@ -801,8 +801,23 @@ export const ensureCompetencia = createServerFn({ method: "POST" })
       .insert({ empresa_id: data.empresa_id, periodo, status: "aberta" })
       .select("id")
       .single();
-    if (error) throw new Error(error.message);
-    return { id: created.id };
+    if (!error) return { id: created.id };
+
+    // Race: dois uploads simultâneos para a mesma empresa/competência nova
+    // podem colidir aqui (select acima não achou nada pros dois, mas o insert
+    // de um perde pra unique_violation do outro). Em vez de derrubar o upload
+    // que perdeu a corrida, busca de novo — a linha já existe, criada pelo
+    // outro request.
+    if (error.code === "23505") {
+      const { data: retry } = await context.supabase
+        .from("competencias")
+        .select("id")
+        .eq("empresa_id", data.empresa_id)
+        .eq("periodo", periodo)
+        .maybeSingle();
+      if (retry) return { id: retry.id };
+    }
+    throw new Error(error.message);
   });
 
 export const setDocumentoStatus = createServerFn({ method: "POST" })

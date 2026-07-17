@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useSuspenseQuery, useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { PageHeader, ResumoTela } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,10 +12,11 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Plus, Download, Sparkles, Eye, Loader2, ClipboardCheck, ChevronLeft, ChevronRight } from "lucide-react";
 import { StatusPill, variantFor } from "@/components/status-pill";
-import { listEmpresas, createDocumento, setDocumentoStatus, ensureCompetencia, getDocumentosResumo, listDocumentosPaginado, getDocumentosCompetencias } from "@/lib/lcr.functions";
+import { listEmpresas, setDocumentoStatus, getDocumentosResumo, listDocumentosPaginado, getDocumentosCompetencias } from "@/lib/lcr.functions";
 import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
 import { documentoComErroProcessamento } from "@/lib/documento-erros";
 import { DocumentoErroHint } from "@/components/documento-erro-hint";
+import { ACCEPT_ARQUIVO, invocarProcessamentoIa, uploadDocumentoManual } from "@/lib/upload-documento";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { requireAcesso } from "@/lib/guard";
@@ -259,43 +260,24 @@ function UploadDialog({ empresas, onSuccess }: { empresas: { id: string; razao_s
   const [form, setForm] = useState({ empresa_id: "", tipo: "extrato", competencia: competenciaAtual() });
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  // Lock em ref (não só state) — bloqueia duplo-clique antes mesmo do
+  // re-render que desabilita o botão via `loading`.
+  const enviandoRef = useRef(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (enviandoRef.current) return;
     if (!form.empresa_id) return toast.error("Selecione o cliente");
     if (!form.competencia.match(/^\d{4}-\d{2}$/)) return toast.error("Competência no formato AAAA-MM");
     if (!file) return toast.error("Selecione um arquivo");
+    enviandoRef.current = true;
     setLoading(true);
     try {
-      // 1) garante a competência e obtém o id
-      const { id: competencia_id } = await ensureCompetencia({
-        data: { empresa_id: form.empresa_id, competencia: form.competencia },
-      });
-
-      // 2) upload real no bucket "documentos-clientes" · path {empresa}/{ano-mes}/auto/{file}
-      const path = `${form.empresa_id}/${form.competencia}/auto/${crypto.randomUUID()}-${file.name}`;
-      const { error: upErr } = await supabase.storage
-        .from("documentos-clientes")
-        .upload(path, file, { upsert: false, cacheControl: "3600" });
-      if (upErr) {
-        toast.error(upErr.message);
-        setLoading(false);
-        return;
-      }
-
-      // 3) registra o documento (status_processamento = pendente)
-      const doc = await createDocumento({
-        data: {
-          empresa_id: form.empresa_id,
-          tipo: form.tipo as "extrato",
-          competencia: form.competencia,
-          competencia_id,
-          arquivo_url: path,
-          storage_path: path,
-          arquivo_nome: file.name,
-          arquivo_tamanho_bytes: file.size,
-          mime_type: file.type || "application/pdf",
-        },
+      const { documentoId } = await uploadDocumentoManual({
+        empresaId: form.empresa_id,
+        competencia: form.competencia,
+        tipo: form.tipo,
+        file,
       });
 
       qc.invalidateQueries({ queryKey: ["documentos"] });
@@ -305,8 +287,8 @@ function UploadDialog({ empresas, onSuccess }: { empresas: { id: string; razao_s
       toast.success("Documento enviado. Processando com IA…");
       onSuccess();
 
-      // 4) dispara o processamento IA (best-effort) e atualiza a UI ao concluir
-      void supabase.functions.invoke("processar-documento", { body: { documento_id: doc.id } }).then(({ data, error }) => {
+      // dispara o processamento IA (best-effort) e atualiza a UI ao concluir
+      void invocarProcessamentoIa(documentoId).then(({ data, error }) => {
         qc.invalidateQueries({ queryKey: ["documentos"] });
         qc.invalidateQueries({ queryKey: ["documentos-paginadas"] });
         qc.invalidateQueries({ queryKey: ["documentos-resumo"] });
@@ -317,7 +299,10 @@ function UploadDialog({ empresas, onSuccess }: { empresas: { id: string; razao_s
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro");
-    } finally { setLoading(false); }
+    } finally {
+      enviandoRef.current = false;
+      setLoading(false);
+    }
   }
 
   return (
@@ -342,7 +327,7 @@ function UploadDialog({ empresas, onSuccess }: { empresas: { id: string; razao_s
           <div className="space-y-1.5"><Label>Competência</Label><Input value={form.competencia} onChange={(e) => setForm({ ...form, competencia: e.target.value })} placeholder="2026-05" /></div>
           <div className="space-y-1.5">
             <Label>Arquivo</Label>
-            <Input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+            <Input type="file" accept={ACCEPT_ARQUIVO} onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
           </div>
         </div>
         <DialogFooter><Button type="submit" disabled={loading}>{loading ? "Enviando..." : "Registrar"}</Button></DialogFooter>

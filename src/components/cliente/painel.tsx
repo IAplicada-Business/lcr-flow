@@ -1,7 +1,7 @@
 // Componentes das abas do Painel do Cliente. Reorganizam telas existentes
 // reaproveitando as MESMAS server functions — sem reescrever a lógica de negócio.
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,11 +12,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { StatusPill, variantFor } from "@/components/status-pill";
 import { Markdown } from "@/components/markdown";
-import { listDocumentos, gerarPlanilhaSci, getHistoricoCerebro, createDocumento, ensureCompetencia, listLancamentosConciliacao, getEmpresa, editarLancamento, type SciLinha } from "@/lib/lcr.functions";
+import { listDocumentos, gerarPlanilhaSci, getHistoricoCerebro, listLancamentosConciliacao, getEmpresa, editarLancamento, type SciLinha } from "@/lib/lcr.functions";
 import { baixarPlanilhaSciXls, bancoCodigoDe, linhasSciPreview, mapaPdcApelidos, validarLancamentosSci, type SciCelula } from "@/lib/sci-xls";
 import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
 import { documentoComErroProcessamento } from "@/lib/documento-erros";
 import { DocumentoErroHint } from "@/components/documento-erro-hint";
+import { ACCEPT_ARQUIVO, invocarProcessamentoIa, uploadDocumentoManual } from "@/lib/upload-documento";
 import { supabase } from "@/integrations/supabase/client";
 import { trackAction } from "@/lib/logs.functions";
 import { Sparkles, Loader2, ClipboardCheck, Download, FileSpreadsheet, X, Plus, Eye, ChevronRight, AlertTriangle } from "lucide-react";
@@ -172,35 +173,23 @@ function UploadDocDialog({ empresaId, competenciaPadrao }: { empresaId: string; 
   const [competencia, setCompetencia] = useState(competenciaPadrao ?? competenciaAtual());
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
+  // Lock em ref (não só state) — bloqueia duplo-clique antes mesmo do
+  // re-render que desabilita o botão via `loading`.
+  const enviandoRef = useRef(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (enviandoRef.current) return;
     if (!file) { toast.error("Selecione um arquivo."); return; }
     if (!/^\d{4}-\d{2}$/.test(competencia)) { toast.error("Competência no formato AAAA-MM."); return; }
+    enviandoRef.current = true;
     setLoading(true);
     try {
-      const { id: competencia_id } = await ensureCompetencia({ data: { empresa_id: empresaId, competencia } });
-      const safeName = file.name.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-zA-Z0-9._-]/g, "_");
-      const path = `${empresaId}/${competencia}/auto/${crypto.randomUUID()}-${safeName}`;
-      const { error: upErr } = await supabase.storage.from("documentos-clientes").upload(path, file, { upsert: false, cacheControl: "3600" });
-      if (upErr) { toast.error(upErr.message); setLoading(false); return; }
-      const doc = await createDocumento({
-        data: {
-          empresa_id: empresaId,
-          tipo: tipo as "extrato",
-          competencia,
-          competencia_id,
-          arquivo_url: path,
-          storage_path: path,
-          arquivo_nome: file.name,
-          arquivo_tamanho_bytes: file.size,
-          mime_type: file.type || "application/pdf",
-        },
-      });
+      const { documentoId } = await uploadDocumentoManual({ empresaId, competencia, tipo, file });
       qc.invalidateQueries({ queryKey: ["documentos"] });
       toast.success("Documento enviado. Processando com IA…");
       setOpen(false); setFile(null);
-      void supabase.functions.invoke("processar-documento", { body: { documento_id: doc.id } }).then(({ data, error }) => {
+      void invocarProcessamentoIa(documentoId).then(({ data, error }) => {
         qc.invalidateQueries({ queryKey: ["documentos"] });
         qc.invalidateQueries({ queryKey: ["lanc-conc"] });
         const r = data as { ok?: boolean; lancamentos_gerados?: number; error?: string } | null;
@@ -209,7 +198,10 @@ function UploadDocDialog({ empresaId, competenciaPadrao }: { empresaId: string; 
       });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro");
-    } finally { setLoading(false); }
+    } finally {
+      enviandoRef.current = false;
+      setLoading(false);
+    }
   }
 
   return (
@@ -227,7 +219,7 @@ function UploadDocDialog({ empresaId, competenciaPadrao }: { empresaId: string; 
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5"><Label>Competência</Label><Input value={competencia} onChange={(e) => setCompetencia(e.target.value)} placeholder="2026-06" /></div>
-            <div className="space-y-1.5"><Label>Arquivo</Label><Input type="file" onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></div>
+            <div className="space-y-1.5"><Label>Arquivo</Label><Input type="file" accept={ACCEPT_ARQUIVO} onChange={(e) => setFile(e.target.files?.[0] ?? null)} /></div>
           </div>
           <DialogFooter><Button type="submit" disabled={loading}>{loading ? "Enviando..." : "Registrar"}</Button></DialogFooter>
         </form>

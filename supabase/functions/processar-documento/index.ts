@@ -30,7 +30,7 @@ function classificarErroDocumento(msg: string): { error_code: string; error_acao
   if (m.includes("hist_sci_codigo_fkey")) return { error_code: "HISTORICO_INVALIDO", error_acao: "Reprocesse após validar o histórico no plano SCI." };
   if (m.includes("foreign key")) return { error_code: "HISTORICO_INVALIDO", error_acao: "Reprocesse ou corrija conta/histórico na revisão." };
   if (m.includes("json") && (m.includes("válido") || m.includes("valido"))) return { error_code: "JSON_TRUNCADO", error_acao: "Reprocesse o documento." };
-  if (m.includes("não suportado") || m.includes("nao suportado")) return { error_code: "TIPO_NAO_SUPORTADO", error_acao: "Use PDF, imagem, CSV ou XML." };
+  if (m.includes("não suportado") || m.includes("nao suportado")) return { error_code: "TIPO_NAO_SUPORTADO", error_acao: "Use PDF, imagem, CSV ou XML. Excel (.xls/.xlsx) é convertido para CSV no upload — se chegou aqui como Excel, o upload não passou pela conversão (ex.: script antigo)." };
   if (m.includes("sem arquivo") || m.includes("falha ao baixar")) return { error_code: "ARQUIVO_AUSENTE", error_acao: "Reenvie o documento." };
   if (/claude api|rate_limit|529|overloaded/i.test(m)) return { error_code: "IA_FALHA", error_acao: "Tente reprocessar em alguns minutos." };
   return { error_code: "DESCONHECIDO", error_acao: "Revise o arquivo ou reenvie pelo cliente." };
@@ -271,7 +271,27 @@ Deno.serve(async (req) => {
   if (!doc) return fail("Documento não encontrado");
 
   const empresa = doc.empresa as { razao_social?: string; cnpj?: string } | null;
-  await admin.from("documentos").update({ status_processamento: "processando" }).eq("id", documento_id);
+
+  // Guarda de concorrência: update condicional em vez de incondicional. Se duas
+  // invocações chegarem quase juntas para o MESMO documento_id (duplo-clique no
+  // upload, ou upload + reprocesso manual em cima), a 1ª grava "processando" e
+  // "trava" a linha; a 2ª não acha nenhuma linha pra atualizar (status já não é
+  // mais o anterior) e desiste antes de duplicar lançamentos/CSV. Não bloqueia
+  // reprocesso legítimo sequencial (classificado/erro/duplicata → processando
+  // sempre passa); só bloqueia rodar em cima de um "processando" bem recente.
+  // Lock considerado "travado" (stale) depois de 5min sem update — cobre o caso
+  // de uma invocação anterior ter morrido sem chamar markErro (crash da edge).
+  const staleThreshold = new Date(Date.now() - 5 * 60_000).toISOString();
+  const { data: lockRows, error: lockErr } = await admin
+    .from("documentos")
+    .update({ status_processamento: "processando" })
+    .eq("id", documento_id)
+    .or(`status_processamento.neq.processando,updated_at.lt.${staleThreshold}`)
+    .select("id");
+  if (lockErr) return fail(lockErr.message);
+  if (!lockRows || lockRows.length === 0) {
+    return fail("Documento já está sendo processado por outra chamada. Aguarde a conclusão e tente novamente.");
+  }
 
   const markErro = async (msg: string) => {
     const cat = classificarErroDocumento(msg);
@@ -283,6 +303,19 @@ Deno.serve(async (req) => {
     return fail(msg);
   };
 
+  // Try/catch global: antes, só a chamada à Claude API (mais abaixo) tinha
+  // proteção — qualquer exceção depois dela (insert de lançamentos, geração de
+  // CSV sintético, sync de contas_bancarias) propagava sem chamar markErro,
+  // deixando o documento preso em "processando" pra sempre (sem sinal de erro
+  // pro usuário, sem poder reprocessar). Agora QUALQUER exceção não tratada no
+  // resto do processamento cai aqui e marca o documento como erro.
+  try {
+    return await processarDocumento();
+  } catch (e) {
+    return await markErro(`Falha inesperada ao processar documento: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  async function processarDocumento(): Promise<Response> {
   // baixa o arquivo: prefere storage_path (bucket documentos-clientes), senão arquivo_url (bucket documentos)
   const bucket = doc.storage_path ? "documentos-clientes" : "documentos";
   const path = doc.storage_path ?? doc.arquivo_url;
@@ -297,7 +330,8 @@ Deno.serve(async (req) => {
   // EXTRATO BANCÁRIO. Não cria lançamentos aqui — isso acontece no pós-IA.
   //
   // #mover-geracao-csv-edge: por padrão sobe o arquivo original (`bytes`) — vale
-  // pra CSV/TXT reais. Quando o original é binário (PDF/imagem/XLSX), o caller
+  // pra CSV/TXT reais. Quando o original é binário (PDF/imagem — Excel já chega
+  // convertido em CSV pelo client, ver src/lib/upload-documento.ts), o caller
   // passa `conteudo`/`contentType`/`nomeArquivo` com um CSV sintético já gerado
   // (ver montarCsvSintetico), porque `conciliar` (motor de saldo/faltantes) só
   // sabe ler texto delimitado — subir o binário direto como extrato_csv_url
@@ -327,7 +361,11 @@ Deno.serve(async (req) => {
   if (ext === "pdf") contentBlock = { type: "document", source: { type: "base64", media_type: "application/pdf", data: toBase64(bytes) } };
   else if (IMG[ext]) contentBlock = { type: "image", source: { type: "base64", media_type: IMG[ext], data: toBase64(bytes) } };
   else if (TEXTUAL.has(ext)) contentBlock = { type: "text", text: `Conteúdo do arquivo (${ext}):\n\n${new TextDecoder().decode(bytes).slice(0, 100_000)}` };
-  else return markErro(`Tipo .${ext} não suportado (use PDF, imagem ou XML/CSV).`);
+  // .xls/.xlsx: não chega aqui no upload manual normal (o client já converte
+  // pra CSV antes de subir — ver src/lib/upload-documento.ts). Só cai neste
+  // ramo se algo subiu Excel direto pro Storage sem passar pela conversão
+  // (upload antigo, script, ou falha silenciosa do client).
+  else return markErro(`Tipo .${ext} não suportado (use PDF, imagem, CSV/XML ou Excel — o Excel deveria ter sido convertido para CSV antes do upload).`);
 
   // Contexto autoritativo: Plano de Contas oficial LCR + Plano de Históricos SCI
   // (Anexos 1 e 2). CONTAS_IA/HIST_IA continuam curando o subconjunto para
@@ -511,8 +549,8 @@ Deno.serve(async (req) => {
   }
 
   // #mover-geracao-csv-edge: só sobe o arquivo original direto quando ele já é
-  // texto delimitável (CSV/TXT real). PDF/imagem/XLSX geram CSV sintético mais
-  // abaixo, depois que os lançamentos (rowsJanela) estiverem disponíveis.
+  // texto delimitável (CSV/TXT real). PDF/imagem (binário) geram CSV sintético
+  // mais abaixo, depois que os lançamentos (rowsJanela) estiverem disponíveis.
   const extratoOriginalTextual = TEXTUAL.has(ext);
   let concPath: string | null = null;
   if (isExtratoBancario && extratoOriginalTextual) {
@@ -652,7 +690,7 @@ Deno.serve(async (req) => {
   }
   if (foraJanela) console.log(`janela competência: ${foraJanela} lançamento(s) fora de ±1 mês descartado(s)`);
 
-  // #mover-geracao-csv-edge: extrato original binário (PDF/imagem/XLSX) — gera o
+  // #mover-geracao-csv-edge: extrato original binário (PDF/imagem) — gera o
   // CSV sintético agora que rowsJanela existe e sobe como extrato_csv_url no
   // lugar do binário. Documentos novos passam a ter sempre um CSV analisável
   // por `conciliar`; o fallback formatoBinarioDetectado/lancamentos_ia em
@@ -690,4 +728,5 @@ Deno.serve(async (req) => {
     lancamentos_gerados: lancCriados,
     classificacao,
   });
+  } // fim processarDocumento()
 });

@@ -64,12 +64,19 @@ export function _assinLanc(rows: LancRow[]): Set<string> {
   return s;
 }
 
+// #fix-dedup-falso-positivo: denominador é o MAIOR conjunto (Math.max), não o
+// menor. Com Math.min, um extrato pequeno cujas linhas são subconjunto de um
+// extrato grande já existente (ex.: reenvio parcial, ou a IA truncou o
+// original e agora extraiu mais linhas) dava overlap ≈ 1.0 e era marcado como
+// duplicata indevidamente — perdendo a razão legítima. Exigir sobreposição em
+// relação ao maior conjunto reduz esse falso positivo sem abrir mão de detectar
+// duplicata real (mesmo extrato reenviado ainda dá ~100% dos dois lados).
 export function _sobreposicao(aRows: LancRow[], bRows: LancRow[]): number {
   const a = _assinLanc(aRows), b = _assinLanc(bRows);
   if (!a.size || !b.size) return 0;
   let inter = 0;
   for (const x of a) if (b.has(x)) inter++;
-  return inter / Math.min(a.size, b.size);
+  return inter / Math.max(a.size, b.size);
 }
 
 // Decisão de dedup do edge, isolada p/ teste: replica a lógica do index.ts.

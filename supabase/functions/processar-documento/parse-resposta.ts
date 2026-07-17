@@ -128,7 +128,13 @@ export function normalizarClassificacao(raw: unknown): ClassificacaoParsed {
     cliente_identificado: o.cliente_identificado != null ? String(o.cliente_identificado) : undefined,
     competencia: o.competencia != null ? String(o.competencia) : undefined,
     confidence_geral: typeof o.confidence_geral === "number" ? o.confidence_geral : undefined,
-    dados_extraidos: o.dados_extraidos != null ? String(o.dados_extraidos) : undefined,
+    // #fix-dados-extraidos-object: a IA normalmente retorna dados_extraidos como
+    // objeto JSON (não string) — String(obj) virava literalmente "[object Object]",
+    // que o index.ts (auto-sync de contas_bancarias) tentava JSON.parse e falhava
+    // silenciosamente, caindo no fallback {} (banco/agência/conta nunca sincronizavam).
+    dados_extraidos: o.dados_extraidos != null
+      ? (typeof o.dados_extraidos === "string" ? o.dados_extraidos : JSON.stringify(o.dados_extraidos))
+      : undefined,
     agencia: o.agencia != null ? String(o.agencia) : undefined,
     conta: o.conta != null ? String(o.conta) : (o.conta_corrente != null ? String(o.conta_corrente) : undefined),
     conta_corrente: o.conta_corrente != null ? String(o.conta_corrente) : undefined,

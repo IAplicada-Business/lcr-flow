@@ -120,6 +120,36 @@ Deno.test("dedupIntraDocumento remove repetidas mesma data+valor", () => {
   assertEquals(out[1].valor, 100);
 });
 
+Deno.test("#fix-dedup-falso-positivo: extrato pequeno subconjunto de um grande NÃO é duplicata automática", () => {
+  // Cenário do bug: extrato grande já processado (10 linhas). Um reenvio parcial
+  // (ex.: a IA truncou o novo doc e só extraiu 3 linhas, todas presentes no
+  // original) tinha overlap=3/min(3,10)=1.0 com o denominador antigo (Math.min)
+  // e era marcado como duplicata indevidamente, descartando uma razão nova que
+  // podia ter lançamentos legítimos que ainda nem foram comparados.
+  const original = Array.from({ length: 10 }, (_, i) => ({
+    data_lancamento: `2026-06-${String(i + 1).padStart(2, "0")}`,
+    valor: i + 1,
+  }));
+  const subconjuntoPequeno = original.slice(0, 3); // 3 de 10, todas batem
+  const overlapMin = 3 / Math.min(3, 10); // comportamento antigo: 1.0
+  const overlapMax = _sobreposicao(subconjuntoPequeno, original);
+  assertEquals(overlapMin, 1);
+  assertEquals(overlapMax, 3 / 10);
+  assertEquals(overlapMax >= OVERLAP_MIN_DEDUP, false);
+  assertEquals(deveMarcarDuplicata("4465|33033|2026-06", true, original, subconjuntoPequeno), false);
+});
+
+Deno.test("#fix-dedup-falso-positivo: duplicata real (mesmo extrato, mesmo tamanho) continua detectada", () => {
+  // Garante que o fix não regride o caso principal do dedup: reenvio do MESMO
+  // extrato (tamanhos iguais) continua batendo ~100% dos dois lados.
+  const lancs = Array.from({ length: 8 }, (_, i) => ({
+    data_lancamento: `2026-06-${String(i + 1).padStart(2, "0")}`,
+    valor: (i + 1) * 10,
+  }));
+  assertEquals(_sobreposicao(lancs, lancs), 1);
+  assertEquals(deveMarcarDuplicata("4465|33033|2026-06", true, lancs, lancs), true);
+});
+
 Deno.test("limiar de overlap coerente com OVERLAP_MIN_DEDUP", () => {
   // 3 de 5 iguais = 0.6 (>= limiar) → marca; 2 de 5 = 0.4 (< limiar) → não marca.
   const base = [
