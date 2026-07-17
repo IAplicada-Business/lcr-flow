@@ -68,7 +68,7 @@ app.get('/health', (_req, res) => res.json({ ok: true, running: estado.running, 
 app.get('/runs/latest', auth, (_req, res) => res.json({ ok: true, ...estado }));
 
 app.post('/orquestrar', auth, (req, res) => {
-  const { competencia, limite, cliente } = req.body || {};
+  const { competencia, limite, cliente, via_api } = req.body || {};
   // Log de cada disparo (visibilidade: quem/quando/qual competência) → journalctl.
   const ip = (req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '?').toString();
   console.log(`[orquestrar] POST competencia=${competencia} limite=${limite ?? '-'} cliente=${cliente ?? '-'} ip=${ip} running=${estado.running} at ${new Date().toISOString()}`);
@@ -82,6 +82,7 @@ app.post('/orquestrar', auth, (req, res) => {
   const args = ['src/orquestrar.py', '--competencia', competencia];
   if (limite) args.push('--limite', String(parseInt(limite, 10)));
   if (cliente) args.push('--cliente', String(cliente));
+  if (via_api) args.push('--via-api');
 
   const env = { ...process.env, PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' };
   // detached: o filho vira líder de grupo → conseguimos matar a árvore toda

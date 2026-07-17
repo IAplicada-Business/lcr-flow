@@ -41,6 +41,7 @@ from gestta import api_docs                                 # noqa: E402  (detal
 
 OUT_DIR = ROOT / "outputs" / "orquestracao"
 LEDGER = OUT_DIR / "processadas.json"  # idempotência local (cobre 'processada' sem doc no front)
+TAREFAS_VISTAS = OUT_DIR / "tarefas-vistas.json"  # drain: taskId:comp já tentada (aguardando/sem empresa)
 BANCO_PADRAO = 657  # Itaú (fallback)
 COBRANCA_TEMPLATE = "614b4c905962410006a60e08"  # template "COBRANÇA DE MOVIMENTO MENSAL"
 GESTTA_SEARCH = "https://api.gestta.com.br/core/customer/task/search"
@@ -162,6 +163,11 @@ def outro_orquestrar_rodando() -> bool:
     for linha in r.stdout.splitlines():
         linha = linha.strip()
         if not linha or "drain_backlog" in linha:
+            continue
+        # Ignora shells de monitoramento (pgrep -f 'orquestrar.py' no comando bash).
+        if "python" not in linha and "Python" not in linha:
+            continue
+        if "src/orquestrar.py" not in linha:
             continue
         try:
             pid = int(linha.split(None, 1)[0])
@@ -345,7 +351,43 @@ def ja_processada(empresa_id: str, competencia: str) -> bool:
     return bool(docs)
 
 
-def selecionar_pendentes(tarefas: list, competencia: str, limite: int) -> list:
+def _carregar_tarefas_vistas() -> dict:
+    try:
+        return json.loads(TAREFAS_VISTAS.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def tarefa_vista(task_id: str, competencia: str) -> bool:
+    if not task_id:
+        return False
+    return f"{task_id}:{competencia}" in _carregar_tarefas_vistas()
+
+
+def marcar_tarefa_vista(task_id: str, competencia: str, status: str, motivo: str = ""):
+    """Drain: evita reprocessar forever aguardando_docs / sem empresa no Supabase."""
+    if not task_id:
+        return
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    vist = _carregar_tarefas_vistas()
+    vist[f"{task_id}:{competencia}"] = {
+        "status": status,
+        "motivo": (motivo or "")[:300],
+        "em": dt.datetime.now().isoformat(timespec="seconds"),
+    }
+    TAREFAS_VISTAS.write_text(json.dumps(vist, ensure_ascii=False, indent=0), encoding="utf-8")
+
+
+def _marcar_vista_se_aplicavel(marcar_vistas: bool, task_id: str, competencia: str, status: str, motivo: str = ""):
+    if not marcar_vistas:
+        return
+    if status == "aguardando_docs":
+        marcar_tarefa_vista(task_id, competencia, status, motivo)
+    elif status == "erro" and (motivo or "").startswith("empresa não encontrada"):
+        marcar_tarefa_vista(task_id, competencia, status, motivo)
+
+
+def selecionar_pendentes(tarefas: list, competencia: str, limite: int, pular_vistas: bool = False) -> list:
     """Varre a lista e devolve as próximas `limite` tarefas AINDA NÃO processadas,
     já com a empresa resolvida (anexada em t['_empresa']).
 
@@ -355,6 +397,8 @@ def selecionar_pendentes(tarefas: list, competencia: str, limite: int) -> list:
     Tarefas cuja empresa não resolve seguem como pendentes (viram 'erro' visível no loop)."""
     pend = []
     for t in tarefas:
+        if pular_vistas and tarefa_vista(t.get("taskId"), competencia):
+            continue
         nome = t.get("clienteNome") or ""
         codigo = t.get("clienteCodigo") or ""
         try:
@@ -362,8 +406,7 @@ def selecionar_pendentes(tarefas: list, competencia: str, limite: int) -> list:
         except Exception:
             empresa = None
         if empresa is not None:
-            comp_mov = t.get("competence") or competencia
-            if ja_processada(empresa["id"], comp_mov):
+            if ja_processada(empresa["id"], competencia):
                 continue  # já feita → não consome slot do lote
         t["_empresa"] = empresa
         pend.append(t)
@@ -387,11 +430,11 @@ def processar_tarefa(t: dict, competencia: str, comp_g: str, jwt: str) -> dict:
     if not empresa:
         return {**base, "status": "erro", "motivo": f"empresa não encontrada no Supabase ('{nome or codigo}')"}
     empresa_id = empresa["id"]
-    comp_mov = t.get("competence") or competencia   # mês do movimento (lançamentos vão p/ cá)
+    comp_mov = t.get("competence") or competencia   # referência Gestta (log); gravação no front usa `competencia`
     base["empresa_id"] = empresa_id
     base["competencia_movimento"] = comp_mov
 
-    if ja_processada(empresa_id, comp_mov):
+    if ja_processada(empresa_id, competencia):
         return {**base, "status": "pulada_idempotencia"}
 
     # Etapa 2 — suficiência (Gestta leitura + IA)
@@ -421,7 +464,7 @@ def processar_tarefa(t: dict, competencia: str, comp_g: str, jwt: str) -> dict:
     # Etapa 4 — baixa + classifica + envia ao front (sem concluir no Gestta)
     banco = resolver_banco(empresa_id) or BANCO_PADRAO
     try:
-        resumo = bf.processar_via_gestta(empresa_id, competencia, None, tarefa_id, banco, jwt, competencia_front=comp_mov)
+        resumo = bf.processar_via_gestta(empresa_id, competencia, None, tarefa_id, banco, jwt, competencia_front=competencia)
     except Exception as e:
         return {**base, "status": "erro", "motivo": f"etapa4: {str(e)[:600]}"}
 
@@ -482,11 +525,11 @@ def processar_tarefa_api(t: dict, competencia: str, comp_g: str, jwt: str, jwt_g
     if not empresa:
         return {**base, "status": "erro", "motivo": f"empresa não encontrada no Supabase ('{nome or codigo}')"}
     empresa_id = empresa["id"]
-    comp_mov = t.get("competence") or competencia   # mês do movimento (lançamentos vão p/ cá)
+    comp_mov = t.get("competence") or competencia   # referência Gestta (log); gravação no front usa `competencia`
     base["empresa_id"] = empresa_id
     base["competencia_movimento"] = comp_mov
 
-    if ja_processada(empresa_id, comp_mov):
+    if ja_processada(empresa_id, competencia):
         return {**base, "status": "pulada_idempotencia"}
 
     # Etapa 2 — suficiência via API REST (1 GET traz docs + customer p/ o download)
@@ -536,14 +579,14 @@ def processar_tarefa_api(t: dict, competencia: str, comp_g: str, jwt: str, jwt_g
 
     try:
         # Backfill: extrato que o parser local não ler cai p/ a edge (IA lê layouts diversos).
-        resumo = bf.processar_arquivos(empresa_id, comp_mov, processaveis, banco, jwt, extrato_fallback_edge=True)
+        resumo = bf.processar_arquivos(empresa_id, competencia, processaveis, banco, jwt, extrato_fallback_edge=True)
     except Exception as e:
         return {**base, "status": "erro", "motivo": f"etapa4(api): {str(e)[:600]}"}
 
     # Sinaliza os extratos vazios: aviso EXPLÍCITO no documento (tela de Revisão) —
     # "sem movimento no período" — para não parecer que faltou processar.
     for v in vazios_dl:
-        _sinalizar_documento(empresa_id, comp_mov, v["arquivo"], f"AVISO: {v['motivo']}")
+        _sinalizar_documento(empresa_id, competencia, v["arquivo"], f"AVISO: {v['motivo']}")
         log(f"    sinalizado extrato vazio: {v['arquivo']} — {v['motivo']}")
 
     if resp:
@@ -584,6 +627,8 @@ def main():
     ap.add_argument("--ignorar-suficiencia", action="store_true",
                     help="backfill de mês fechado: processa qualquer tarefa com arquivo baixável, "
                          "sem exigir suficiência (pula o gate aguardando_docs). Só com --via-api.")
+    ap.add_argument("--marcar-vistas", action="store_true",
+                    help="drain/backfill: marca aguardando_docs e sem_empresa como vistas p/ avançar fila")
     args = ap.parse_args()
 
     # Self-guard: não roda 2 orquestradores ao mesmo tempo (n8n + run manual).
@@ -634,7 +679,7 @@ def main():
                    if c in (t.get("clienteCodigo") or "").lower() or c in (t.get("clienteNome") or "").lower()]
         log(f"    filtro --cliente '{args.cliente}': {len(tarefas)} tarefa(s)")
     if args.limite:
-        tarefas = selecionar_pendentes(tarefas, args.competencia, args.limite)
+        tarefas = selecionar_pendentes(tarefas, args.competencia, args.limite, args.marcar_vistas)
         log(f"    --limite {args.limite}: {len(tarefas)} pendente(s) selecionada(s) (já-processadas puladas antes do corte)")
 
     resultados = []
@@ -653,7 +698,9 @@ def main():
             extra = f" ({r.get('motivo') or r.get('faltando') or ''})"
         log(f"    → {r['status']}{extra}")
         if r.get("status") in ("processada", "sem_documentos"):
-            marcar_processada(r.get("empresa_id"), r.get("competencia_movimento") or args.competencia)
+            marcar_processada(r.get("empresa_id"), args.competencia)
+        _marcar_vista_se_aplicavel(args.marcar_vistas, t.get("taskId"), args.competencia,
+                                   r.get("status", ""), r.get("motivo") or "")
         resultados.append(r)
         if args.pausa and i < len(tarefas):
             log(f"    (pausa {args.pausa:g}s antes da próxima)")
@@ -677,7 +724,8 @@ def main():
     log(f"\n=== RESUMO === {json.dumps(contagem, ensure_ascii=False)}")
     log(f"Log: {arq}")
     # stdout final em JSON (n8n faz parse)
-    print(json.dumps({"ok": True, "competencia": args.competencia, "contagem": contagem, "log": str(arq)}, ensure_ascii=False))
+    print(json.dumps({"ok": True, "competencia": args.competencia, "contagem": contagem,
+                      "total_tarefas": len(tarefas), "log": str(arq)}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

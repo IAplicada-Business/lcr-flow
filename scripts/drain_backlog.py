@@ -39,7 +39,10 @@ def outro_orquestrar_rodando() -> bool:
     Chamado SÓ entre lotes — nesse instante o driver não tem filho ativo."""
     try:
         r = subprocess.run(["pgrep", "-af", "orquestrar.py"], capture_output=True, text=True)
-        linhas = [l for l in r.stdout.splitlines() if "drain_backlog" not in l and l.strip()]
+        linhas = [l for l in r.stdout.splitlines()
+                  if "drain_backlog" not in l and l.strip()
+                  and ("python" in l.lower() or "Python" in l)
+                  and "src/orquestrar.py" in l]
         return bool(linhas)
     except Exception:
         return False
@@ -53,6 +56,7 @@ def rodar_lote(competencia: str, limite: int, status: str = "OPEN",
         cmd.append("--via-api")
     if ignorar_suficiencia:
         cmd.append("--ignorar-suficiencia")
+    cmd.append("--marcar-vistas")
     env = {"PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"}
     import os
     p = subprocess.run(cmd, capture_output=True, text=True, cwd=str(ROOT),
