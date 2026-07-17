@@ -73,11 +73,16 @@ Deno.serve(async (req) => {
   // (conciliacao_.$empresaId.tsx) via avaliarTravaFinalizar (travas.ts). O
   // pareamento D/C (divergencias_count) NÃO trava mais — removido da spec v3.
   if (modo === "finalizar") {
+    // #fix-revisao-valor-null: precisa do mesmo filtro usado em listLancamentosConciliacao
+    // (front) e no cálculo de revisaoPendenteAnalisar abaixo — sem isso, qualquer
+    // lançamento residual com valor=null (nunca aparece na tela) trava o finalizar
+    // pra sempre, já que ele conta como "sem conta" em contarRevisaoPendente.
     const { data: revRows, error: revErr } = await admin
       .from("lancamentos")
       .select("confidence, conta_id")
       .eq("empresa_id", conc.empresa_id)
-      .eq("competencia", conc.competencia);
+      .eq("competencia", conc.competencia)
+      .not("valor", "is", null);
     if (revErr) return fail(revErr.message);
     const revisaoPendente = contarRevisaoPendente(
       (revRows ?? []).map((r) => ({ confidence: r.confidence == null ? null : Number(r.confidence), contaId: (r.conta_id as string | null) ?? null })),
