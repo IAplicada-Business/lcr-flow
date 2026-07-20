@@ -118,25 +118,30 @@ def buscar_pdc_apelidos() -> dict[int, int]:
 
 def buscar_pdc_tc() -> list[dict]:
     """codigo/classificacao/tipo do Plano de Contas LCR (Anexo 1), para a
-    resolução #136 (conta T sintética → filha analítica)."""
+    resolução #136 (conta T sintética ou C consolidada → filha analítica)."""
     return sb_get("plano_de_contas_lcr", {"select": "codigo,classificacao,tipo"})
+
+
+TIPOS_NAO_ANALITICOS = ("T", "C")
 
 
 def resolver_conta_analitica(codigo, pdc_tc: list[dict]) -> tuple[int | None, str]:
     """Espelha resolverContaAnalitica (src/lib/sci-xls.ts). Retorna
     (codigo_resolvido_ou_None, status) onde status é um de:
-    'analitica' (já aceita lançamento), 'resolvido', 'ambigua', 'sem_filha'."""
+    'analitica' (já aceita lançamento), 'resolvido', 'ambigua', 'sem_filha'.
+    Trata contas tipo T (sintética) e C (consolidada) da mesma forma —
+    nenhuma das duas aceita lançamento direto, só a filha analítica."""
     try:
         cod = int(codigo)
     except (TypeError, ValueError):
         return None, "analitica"
     conta = next((r for r in pdc_tc if r.get("codigo") == cod), None)
-    if not conta or conta.get("tipo") != "T":
+    if not conta or conta.get("tipo") not in TIPOS_NAO_ANALITICOS:
         return cod, "analitica"
     prefixo = f"{conta.get('classificacao')}."
     filhas = [
         r for r in pdc_tc
-        if r.get("tipo") != "T" and str(r.get("classificacao") or "").startswith(prefixo)
+        if r.get("tipo") not in TIPOS_NAO_ANALITICOS and str(r.get("classificacao") or "").startswith(prefixo)
     ]
     if not filhas:
         return None, "sem_filha"
@@ -300,8 +305,9 @@ def gerar_planilha(
             sem_conta += 1
             continue
 
-        # #136: conta sintética (T) resolve para a filha analítica; se ambígua
-        # ou sem filha, ignora a linha e reporta para reclassificação manual.
+        # #136: conta sintética (T) ou consolidada (C) resolve para a filha
+        # analítica; se ambígua ou sem filha, ignora a linha e reporta para
+        # reclassificação manual.
         if pdc_tc:
             _, status_tc = resolver_conta_analitica(codigo_lcr, pdc_tc)
             if status_tc in ("ambigua", "sem_filha"):
@@ -343,7 +349,7 @@ def gerar_planilha(
         print(f"  [!] {sem_conta} lancamento(s) ignorado(s) por ausencia de conta.")
 
     if bloqueados_tc:
-        print(f"  [!] {len(bloqueados_tc)} lancamento(s) ignorado(s) — conta sintetica (T) sem filha analitica unica:")
+        print(f"  [!] {len(bloqueados_tc)} lancamento(s) ignorado(s) — conta sintetica/consolidada (T/C) sem filha analitica unica:")
         for b in bloqueados_tc[:10]:
             print(f"      - {b}")
         if len(bloqueados_tc) > 10:
