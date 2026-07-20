@@ -20,6 +20,7 @@ Para bypass de RLS: SUPABASE_SERVICE_ROLE_KEY.
 import sys
 import os
 import argparse
+import unicodedata
 import requests
 import pandas as pd
 from pathlib import Path
@@ -234,8 +235,17 @@ def buscar_empresa(termo: str) -> dict:
     return empresas[0]
 
 
+def _sem_acento(s: str) -> str:
+    """Remove acentos (ex. "Itaú" -> "itau") para comparação tolerante a
+    diacríticos. Espelha semAcento (src/lib/sci-xls.ts)."""
+    return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
+
+
 def buscar_conta_banco(empresa_id: str) -> int | None:
-    """CC nº 1 — mesma regra do front (contas_bancarias[0])."""
+    """CC nº 1 — mesma regra do front (contas_bancarias[0]).
+    Bug 21/07: faltava normalizar acento — "Itaú" (cadastro real do cliente)
+    nunca casava com a chave "itau" do dicionário, deixando o código do banco
+    em branco na Planilha SCI mesmo com o nome aparecendo corretamente."""
     contas = sb_get("contas_bancarias", {
         "select": "banco",
         "empresa_id": f"eq.{empresa_id}",
@@ -244,9 +254,9 @@ def buscar_conta_banco(empresa_id: str) -> int | None:
     })
     if not contas:
         return None
-    banco = (contas[0].get("banco") or "").lower()
+    banco = _sem_acento((contas[0].get("banco") or "").lower())
     for nome, codigo in BANCO_PARA_CODIGO.items():
-        if nome in banco:
+        if _sem_acento(nome) in banco:
             return codigo
     return None
 
