@@ -25,6 +25,11 @@ describe("ehBancoPlaceholder", () => {
     expect(ehBancoPlaceholder("Banco Inter")).toBe(false);
     expect(ehBancoPlaceholder("Bradesco")).toBe(false);
   });
+
+  it('reconhece "não disponível"/"não explícito" como placeholder (achado auditoria 21/07, cliente PLENUS)', () => {
+    expect(ehBancoPlaceholder("Informação não disponível no documento")).toBe(true);
+    expect(ehBancoPlaceholder("Banco não explícito (conta com rendimentos de aplicação automática)")).toBe(true);
+  });
 });
 
 describe("melhorContaBancaria", () => {
@@ -90,6 +95,24 @@ describe("bancoCodigoDe", () => {
     expect(bancoCodigoDe("Banco Qualquer Não Mapeado")).toBeNull();
     expect(bancoCodigoDe(null)).toBeNull();
     expect(bancoCodigoDe(undefined)).toBeNull();
+  });
+
+  it('não confunde "PagSeguro Internet S/A" com Banco Inter (achado auditoria 21/07, cliente VITALENTO)', () => {
+    expect(bancoCodigoDe("PagSeguro Internet S/A")).toBe(946);
+  });
+
+  it("resolve os bancos adicionados na auditoria de 21/07 (Safra, Cora, Mercado Pago, Wise, BS2, Afinz, Nu Pagamentos)", () => {
+    expect(bancoCodigoDe("Banco Safra S/A")).toBe(818);
+    expect(bancoCodigoDe("Cora SCFI")).toBe(917);
+    expect(bancoCodigoDe("Mercado Pago")).toBe(960);
+    expect(bancoCodigoDe("Wise Payments Ltd.")).toBe(1292);
+    expect(bancoCodigoDe("BS2 S.A.")).toBe(830);
+    expect(bancoCodigoDe("Banco Afinz S.A.")).toBe(1197);
+    expect(bancoCodigoDe("NU PAGAMENTOS S.A.")).toBe(821);
+  });
+
+  it('resolve "Banco 208" para BTG Pactual (código COMPE oficial, achado auditoria 21/07)', () => {
+    expect(bancoCodigoDe("Banco 208")).toBe(1031);
   });
 });
 

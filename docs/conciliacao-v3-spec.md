@@ -239,17 +239,18 @@ futuras **já processadas** — não só em documentos novos:
 | [#140](https://github.com/mmarques30/lcr-flow/issues/140) | Editar histórico na conciliação | ✅ Implementado e mesclado (PR #148) |
 | [#137](https://github.com/mmarques30/lcr-flow/issues/137) | Log inatividade + eventos | ✅ Implementado — ver seção "Observabilidade (#137)" abaixo |
 | — | Code review 20–21/07: guard propagação, paginação (>1000/5000 linhas), sinal cruzado, sinal débito/crédito, testes automatizados | ✅ Aplicado — ver seções "Sinal débito/crédito" acima e "Testes automatizados" abaixo |
+| — | Auditoria 21/07: fix Tier 1 (banco placeholder + acento + tie-break) refletiu em **todas as 902 empresas**? | ✅ Auditado — ver seção "Auditoria de resolução de banco (21/07)" abaixo |
 
 ### Tier 2/3 (standby — depende de feedback do cliente)
 
 | Item | Descrição | Status |
 |------|-----------|--------|
-| Resolução dinâmica de banco (CC nº 1) | Trocar dicionário `BANCO_PARA_CODIGO` (16 bancos hardcoded) por resolução contra `plano_de_contas_lcr` — hoje ~16,5% das contas bancárias não batem nem com o fix de acento | Standby |
+| Resolução dinâmica de banco (CC nº 1) | Trocar dicionário `BANCO_PARA_CODIGO` (agora 23 bancos, pós-auditoria 21/07) por resolução contra `plano_de_contas_lcr` — hoje só ~2,9% das empresas com conta cadastrada ainda não resolvem (26 de 902, principalmente bancos raros como Ouribank/Sisprime e roteamento interno "SWAP"/LCR Bank, que não são bancos externos de fato) | Standby |
 | `ContaCombobox` hierárquico | Ordenação hierárquica + bloquear seleção direta de conta T/C | Standby |
 | Aba Configurações → Plano de Contas hierárquico | Agrupamento visual T/C → filhas | Standby |
 | Contas analíticas sem `apelido` | Listar p/ confirmação do cliente + bloquear export | Standby |
 | Backfill ~1.297 lançamentos com `extrato_csv_url` apontando pra binário (não-CSV) | 3 camadas propostas (reparse / CSV sintético via IA / reprocessar) | Backlog — retomar com números corretos |
-| Automação de recebimento/cruzamento pós-fluxo estável (item 3 do CRM) | Depende de esclarecimento do cliente sobre o que automatizar | Pendente |
+| Automação de recebimento/cruzamento pós-fluxo estável (item 3 do CRM) | Descartado (21/07) — cliente avaliou e não faz sentido no momento | Cancelado |
 
 ### Observabilidade (#137)
 
@@ -277,6 +278,55 @@ dashboard `/gestao/logs` já existiam (de outra frente); faltava só emitir os
   consecutivos, pausa em gap > 5min, múltiplos clientes, eventos fora do
   escopo/sem `cliente_id` ignorados, média ignorando processos sem sinal.
 
+### Auditoria de resolução de banco (21/07)
+
+Depois do fix Tier 1 (placeholder + acento + tie-break), o pedido foi: "nos
+certificar de que as melhorias refletiram em todos os clientes" — não só nos
+2-3 clientes onde o bug foi reportado. Script `scripts/_audit_bancos_todas_empresas.py`
+(LCR/VPS) roda `_melhor_conta_bancaria` + resolução de código pra **todas as
+902 empresas** e compara com o comportamento antigo (sempre `contas[0]`, sem
+filtro de placeholder nem normalização de acento).
+
+Resultado (após os ajustes abaixo):
+
+| Categoria | Empresas |
+|---|---|
+| Banco resolvido corretamente | 433 |
+| Sem nenhuma `conta_bancaria` cadastrada (não testável — provavelmente clientes sem extrato ainda processado) | 435 |
+| Todas as contas cadastradas são placeholder ("não identificado" etc.) | 8 |
+| Conta válida mas nome de banco fora do dicionário | 26 |
+| **Empresas onde o fix mudou o resultado vs. o bug antigo** | **84** |
+
+Ou seja: o fix realmente se propagou — não foi só o caso isolado da Cultive,
+mudou o banco resolvido em 84 empresas diferentes. Três achados extras
+corrigidos na mesma auditoria (aplicados em `sci-xls.ts` e
+`gerar_planilha_supabase.py`):
+
+1. **Colisão de substring:** a chave `"inter"` (Banco Inter) casava
+   acidentalmente dentro de `"PagSeguro Internet S/A"` (nome legal oficial do
+   PagBank) — cliente ficava com o banco errado. Corrigido priorizando
+   `"pagseguro"`/`"pagbank"` antes de `"inter"` no dicionário.
+2. **Dicionário incompleto:** 7 bancos novos identificados na auditoria já
+   tinham código cadastrado em `plano_de_contas_lcr` mas não estavam no
+   dicionário — `safra`(818), `cora`(917), `mercado pago`(960), `wise`(1292),
+   `bs2`(830), `afinz`(1197), `"208"`(1031 — código COMPE oficial do BTG
+   Pactual, que a IA por vezes extrai em vez do nome).
+3. **Gap no filtro de placeholder:** `ehBancoPlaceholder` não reconhecia
+   variações como `"Informação não disponível no documento"` ou `"Banco não
+   explícito"` — passavam como "conta válida" e às vezes venciam um registro
+   anterior mais específico (regressão real encontrada no cliente PLENUS).
+   Ampliado o filtro pra cobrir `"disponivel"`/`"explicito"`.
+
+Restam **26 empresas** com conta válida mas banco fora do dicionário — na
+maioria roteamento interno `"SWAP"`/"LCR Bank" (não é banco externo, então
+não deveria resolver mesmo) ou bancos raros ainda não catalogados
+(Ouribank, Sisprime/Sisprima). Fica no item "Resolução dinâmica de banco"
+acima (Tier 2/3, standby).
+
+Testes novos: `bancoCodigoDe`/`ehBancoPlaceholder` em `sci-xls.test.ts`
+cobrindo os 3 achados acima (colisão PagSeguro/Inter, bancos novos, filtro
+de placeholder ampliado).
+
 ### Testes automatizados
 
 Cobertura adicionada no code review de 20–21/07 (antes: zero testes nas
@@ -290,6 +340,7 @@ funções puras de `sci-xls.ts` e nos loops de paginação):
 | `supabase/functions/processar-documento/parse-csv-sinal.test.ts` (deno test) | Deno | `parseCsvComSinal` (override de sinal na ingestão) |
 | `supabase/functions/conciliar/saldo.test.ts` (deno test) | Deno | `validarSaldo`, `detectarFaltantes` (sinal cruzado), `detectarDivergenciaSinal` |
 | `src/lib/logs.functions.test.ts` (vitest) | Node | `calcularTempoRevisaoSci`, `mediaTempoRevisaoSci` (métrica revisão → SCI do #137) |
+| `src/lib/sci-xls.test.ts` (vitest) — ampliado 21/07 | Node | Achados da auditoria de banco: colisão PagSeguro/Inter, bancos novos (Safra/Cora/Mercado Pago/Wise/BS2/Afinz/208), placeholder ampliado |
 
 Rodar: `npm run test` (front) e `deno test supabase/functions/` (edge, requer
 `deno` instalado — `npx -y deno@latest test ...` funciona sem instalação global).

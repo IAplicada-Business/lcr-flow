@@ -4,10 +4,20 @@
 import * as XLSX from "xlsx";
 
 // banco (texto) → código LCR no plano de contas (contrapartida)
+// "pagseguro"/"pagbank" precisam vir ANTES de "inter": "PagSeguro Internet S/A"
+// (nome legal oficial) contém "internet", que colidia com a chave "inter"
+// (Banco Inter) — achado na auditoria de 21/07. "safra"/"cora"/"mercado pago"/
+// "wise"/"bs2"/"afinz" também adicionados na mesma auditoria (~44 empresas com
+// conta válida mas nome de banco fora do dicionário até então).
 const BANCO_PARA_CODIGO: Record<string, number> = {
   bradesco: 9, brasil: 7, "bb ": 7, caixa: 8, santander: 10, itau: 657,
-  inter: 658, sicoob: 659, sicredi: 775, original: 779, nubank: 821,
-  "xp ": 823, c6: 809, stone: 910, pagbank: 946, btg: 1031,
+  pagseguro: 946, pagbank: 946, inter: 658, sicoob: 659, sicredi: 775,
+  original: 779, "nu pagamentos": 821, nubank: 821, "xp ": 823, c6: 809,
+  stone: 910, btg: 1031, safra: 818, cora: 917, "mercado pago": 960,
+  wise: 1292, bs2: 830, afinz: 1197,
+  // "208" é o código COMPE oficial do BTG Pactual no Brasil — a IA às vezes
+  // extrai o código em vez do nome (ex. "Banco 208") — achado auditoria 21/07.
+  "208": 1031,
 };
 const TIPOS_DEBITO = ["ativo", "despesa", "custo", "deducoes"];
 const TIPOS_CREDITO = ["passivo", "receita", "resultado", "patrimonio"];
@@ -48,11 +58,18 @@ export function bancoCodigoDe(bancoNome: string | null | undefined): number | nu
 }
 
 /** Nome de banco "placeholder" — a IA não conseguiu identificar o banco no
- *  documento original (ex. "Não identificado", "Desconhecido", "N/A"). */
+ *  documento original (ex. "Não identificado", "Desconhecido", "N/A").
+ *  Ampliado na auditoria de 21/07: "não disponível"/"não explícito" também
+ *  são placeholders (ex. "Informação não disponível no documento") — antes
+ *  passavam batido e entravam como "conta válida" no melhorContaBancaria,
+ *  às vezes vencendo um registro anterior mais específico (regressão real
+ *  encontrada no cliente PLENUS). */
 export function ehBancoPlaceholder(banco: string | null | undefined): boolean {
   const t = semAcento((banco ?? "").trim().toLowerCase());
   if (!t || t === "n/a") return true;
-  return ["identificado", "especificado", "desconhecido", "informado"].some((p) => t.includes(p));
+  return ["identificado", "especificado", "desconhecido", "informado", "disponivel", "explicito"].some((p) =>
+    t.includes(p),
+  );
 }
 
 /** Escolhe a conta bancária "mais confiável" entre as cadastradas da empresa.
