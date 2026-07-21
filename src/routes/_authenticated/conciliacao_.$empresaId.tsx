@@ -16,6 +16,7 @@ import { DOC_TIPO_LABEL } from "@/lib/format";
 import { formatCompetencia } from "@/lib/format";
 import { DocumentoErroHint } from "@/components/documento-erro-hint";
 import { avisarPropagacao } from "@/lib/propagacao-toast";
+import { melhorContaBancaria } from "@/lib/sci-xls";
 import { supabase } from "@/integrations/supabase/client";
 import { requireAcesso } from "@/lib/guard";
 import { ChevronLeft, Download, CheckCircle2, Sparkles, Wand2, ListChecks, AlertTriangle, FileText, Link2, Pencil, ChevronsUpDown, Check, Plus, Trash2, ArrowUpFromLine, Info } from "lucide-react";
@@ -38,8 +39,10 @@ const FEBRABAN: Record<string, string> = {
   santander: "033", inter: "077", sicoob: "756", sicredi: "748", nubank: "260",
 };
 
-function formatContaBancaria(contas: { banco: string | null; agencia: string | null; conta: string | null }[]): string | null {
-  const c = contas[0];
+// #bugfix-cultive: usa a conta mais recente NÃO placeholder (não "primeira
+// cadastrada") — ver melhorContaBancaria em sci-xls.ts.
+function formatContaBancaria(contas: { id?: string; banco: string | null; agencia: string | null; conta: string | null; created_at?: string | null }[]): string | null {
+  const c = melhorContaBancaria(contas);
   if (!c?.banco && !c?.conta) return null;
   const bancoLower = (c.banco ?? "").toLowerCase();
   const febr = Object.entries(FEBRABAN).find(([k]) => bancoLower.includes(k))?.[1];
@@ -65,10 +68,19 @@ type ResultadoSaldo = {
   motivo?: string;
 };
 type LancFaltante = { id: string; data: string | null; valor: number; descricao?: string | null };
+type DivergenciaSinal = {
+  data: string | null;
+  valor: number;
+  descricaoExtrato: string;
+  descricaoLancamento: string | null;
+  lancamentoId: string;
+};
 type Faltantes = {
   extrato_sem_classificacao: Linha[];
   classificado_sem_extrato: LancFaltante[];
   faltantes_count: number;
+  // #fix-sinal-ia: alerta não-bloqueante — não soma em faltantes_count.
+  divergencias_sinal?: DivergenciaSinal[];
 };
 // #132: pareamento D/C linha a linha removido (conciliados/divergencias_*).
 // Motor v3 (docs/conciliacao-v3-spec.md): só saldo + faltantes.
@@ -80,6 +92,7 @@ type Resultado = {
   extrato_fonte?: "csv" | "lancamentos_ia";
   saldo?: ResultadoSaldo;
   faltantes?: Faltantes;
+  gerado_em?: string;
 } | null;
 
 async function baixar(path: string) {
@@ -239,7 +252,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
   const key = ["conciliacao-detalhe", empresaId, competencia];
   const { data } = useQuery({ queryKey: key, queryFn: () => getConciliacaoDetalhe({ data: { empresa_id: empresaId, competencia } }) });
   const { data: empresaData } = useQuery({ queryKey: ["empresa", empresaId], queryFn: () => getEmpresa({ data: { id: empresaId } }), staleTime: 60_000 });
-  const contaBancariaLabel = formatContaBancaria((empresaData?.contas_bancarias ?? []) as { banco: string | null; agencia: string | null; conta: string | null }[]);
+  const contaBancariaLabel = formatContaBancaria((empresaData?.contas_bancarias ?? []) as { id?: string; banco: string | null; agencia: string | null; conta: string | null; created_at?: string | null }[]);
   const [busy, setBusy] = useState<"analisar" | "finalizar" | null>(null);
 
   // Todos os lançamentos extraídos da competência (compartilha cache com a Razão).
@@ -284,6 +297,15 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
   const [soSemMatch, setSoSemMatch] = useState(false);
   const [soSemSuporte, setSoSemSuporte] = useState(false);
   const semMatchCount = extratoLancs.filter((l) => idsSemMatch.has(l.id)).length;
+  // #ux-snapshot-desatualizado (code review 20/07): idsSemMatch é o retrato da
+  // ÚLTIMA vez que "Analisar divergências" rodou, não é recalculado ao vivo —
+  // se o usuário editar/incluir/excluir lançamento depois disso, a lista fica
+  // desatualizada sem nenhum aviso. Mostra a data/hora da análise no tooltip
+  // pra deixar isso explícito (mesmo raciocínio de resultado.gerado_em já
+  // exposto pelo backend em conciliar/index.ts).
+  const analiseEm = resultado?.gerado_em
+    ? new Date(resultado.gerado_em).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+    : null;
   const visiveisLancs = extratoLancs
     .filter((l) => !soARevisar || precisaRevisao(l))
     .filter((l) => !soSemMatch || idsSemMatch.has(l.id))
@@ -715,7 +737,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
               </label>
             )}
             {semMatchCount > 0 && (
-              <label className={cn("inline-flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-0.5 text-xs", soSemMatch ? "bg-rose-100 font-medium text-rose-800 ring-1 ring-rose-300" : "text-muted-foreground")} title="Lançamentos que vieram do extrato mas o CSV atual não tem mais a linha correspondente (ex.: CSV reenviado sem esse movimento)">
+              <label className={cn("inline-flex cursor-pointer items-center gap-1.5 rounded-full px-2 py-0.5 text-xs", soSemMatch ? "bg-rose-100 font-medium text-rose-800 ring-1 ring-rose-300" : "text-muted-foreground")} title={`Lançamentos que vieram do extrato mas o CSV atual não tem mais a linha correspondente (ex.: CSV reenviado sem esse movimento). Baseado na última análise${analiseEm ? ` (${analiseEm})` : ""} — se você editou/incluiu/excluiu lançamentos depois, clique em "Analisar divergências" de novo pra atualizar esta lista.`}>
                 <input type="checkbox" checked={soSemMatch} onChange={(e) => setSoSemMatch(e.target.checked)} className="h-3.5 w-3.5 cursor-pointer accent-[var(--color-primary)]" />
                 Só sem match ({semMatchCount})
               </label>
@@ -1080,6 +1102,9 @@ function SaldoFaltantesPanel({ saldo, faltantes, analisado, revisaoPendente, act
   const extratoSemClassificacao = faltantes?.extrato_sem_classificacao ?? [];
   const classificadoSemExtrato = faltantes?.classificado_sem_extrato ?? [];
   const faltantesCount = faltantes?.faltantes_count ?? 0;
+  // #fix-sinal-ia: alerta não-bloqueante — só exibe, não trava nem soma na
+  // contagem de faltantes acima (motivo no comentário do tipo Faltantes).
+  const divergenciasSinal = faltantes?.divergencias_sinal ?? [];
   const emptyHint = revisaoPendente
     ? "Revise todos os lançamentos pendentes antes de analisar."
     : !analisado
@@ -1105,6 +1130,30 @@ function SaldoFaltantesPanel({ saldo, faltantes, analisado, revisaoPendente, act
         <div className="flex items-start gap-2 rounded-2xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm text-rose-900">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-rose-600" />
           <span>{saldo.motivo ?? "Saldo inicial + movimentação não bate com o saldo final informado."}</span>
+        </div>
+      )}
+
+      {analisado && divergenciasSinal.length > 0 && (
+        <div className="flex items-start gap-2 rounded-2xl border border-orange-300 bg-orange-50 px-4 py-3 text-sm text-orange-900">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-orange-600" />
+          <div className="min-w-0">
+            <p className="font-medium">
+              {divergenciasSinal.length === 1 ? "1 possível divergência" : `${divergenciasSinal.length} possíveis divergências`} de débito/crédito
+            </p>
+            <p className="mt-0.5 text-orange-900/80">
+              Extrato e lançamento com mesma data e valor, mas sinal oposto — pode ser erro de classificação débito/crédito. Não bloqueia a conciliação; revise se fizer sentido.
+            </p>
+            <ul className="mt-2 space-y-1 text-xs text-orange-900/90">
+              {divergenciasSinal.slice(0, 5).map((d, i) => (
+                <li key={i} className="truncate">
+                  {formatDataBR(d.data)} · {brl(d.valor)} — extrato "{d.descricaoExtrato}" ↔ lançamento "{d.descricaoLancamento ?? "—"}"
+                </li>
+              ))}
+            </ul>
+            {divergenciasSinal.length > 5 && (
+              <p className="mt-1 text-xs text-orange-900/70">+ {divergenciasSinal.length - 5} outra(s)</p>
+            )}
+          </div>
         </div>
       )}
 

@@ -22,7 +22,7 @@
         "npm:@dnd-kit/sortable@10",
         "npm:@eslint/js@^9.32.0",
         "npm:@hookform/resolvers@^5.2.2",
-        "npm:@lovable.dev/vite-tanstack-config@2.7.1",
+        "npm:@lovable.dev/vite-tanstack-config@2.7.6",
         "npm:@radix-ui/react-accordion@^1.2.12",
         "npm:@radix-ui/react-alert-dialog@^1.1.15",
         "npm:@radix-ui/react-aspect-ratio@^1.1.8",
@@ -90,6 +90,7 @@
         "npm:vaul@^1.1.2",
         "npm:vite-tsconfig-paths@^6.0.2",
         "npm:vite@^7.3.1",
+        "npm:vitest@^4.1.10",
         "npm:xlsx@~0.18.5",
         "npm:zod@^3.24.2"
       ]
