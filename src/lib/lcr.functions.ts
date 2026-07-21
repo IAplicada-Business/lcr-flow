@@ -4,6 +4,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import type { Database } from "@/integrations/supabase/types";
 import { TODAS_CHAVES } from "@/lib/acessos";
+import { paginarTodas } from "@/lib/paginar";
 
 async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
   const { data } = await supabase.from("usuarios_perfil").select("perfil").eq("user_id", userId).maybeSingle();
@@ -964,15 +965,24 @@ export const listLancamentosConciliacao = createServerFn({ method: "GET" })
   .inputValidator((d: unknown) => z.object({ empresa_id: z.string().uuid(), competencia: z.string().regex(/^\d{4}-\d{2}$/) }).parse(d))
   .handler(async ({ context, data }) => {
     const { data: empresa } = await context.supabase.from("empresas").select("id, razao_social, nome_fantasia").eq("id", data.empresa_id).maybeSingle();
-    const { data: rows, error } = await context.supabase
-      .from("lancamentos")
-      .select("id, data_lancamento, valor, descricao, documento_numero, part_deb, part_cred, part_aprendido, natureza_movimento, conciliado, confidence, status, fonte_extrato, enriquecido, participante, documento_suporte_id, documento_id, conta:conta_id(codigo, descricao, tipo, sci_apelido, sci_historico_padrao), historico:historico_id(codigo, descricao, sci_apelido)")
-      .eq("empresa_id", data.empresa_id)
-      .eq("competencia", data.competencia)
-      .not("valor", "is", null)
-      .order("data_lancamento", { ascending: true, nullsFirst: false })
-      .range(0, 4999);
-    if (error) throw new Error(error.message);
+    // #bugfix-1170 (mesmo motivo): .range(0, 4999) era um teto fixo — cliente com
+    // mais de 5000 lançamentos numa competência perderia o resto silenciosamente
+    // (revisão pendente subcontada destravando "Finalizar" indevidamente). Pagina
+    // em loop de 1000 (db-max-rows do PostgREST) até esgotar. Segunda chave de
+    // ordenação (id) garante paginação estável — só por data_lancamento, linhas
+    // com a mesma data poderiam repetir/pular entre páginas.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any -- tipagem exata do join não vale o esforço aqui, mapeado abaixo.
+    const rows: any[] = await paginarTodas((offset, pageSize) =>
+      context.supabase
+        .from("lancamentos")
+        .select("id, data_lancamento, valor, descricao, documento_numero, part_deb, part_cred, part_aprendido, natureza_movimento, conciliado, confidence, status, fonte_extrato, enriquecido, participante, documento_suporte_id, documento_id, conta:conta_id(codigo, descricao, tipo, sci_apelido, sci_historico_padrao), historico:historico_id(codigo, descricao, sci_apelido)")
+        .eq("empresa_id", data.empresa_id)
+        .eq("competencia", data.competencia)
+        .not("valor", "is", null)
+        .order("data_lancamento", { ascending: true, nullsFirst: false })
+        .order("id", { ascending: true })
+        .range(offset, offset + pageSize - 1),
+    );
 
     const docIds = [...new Set((rows ?? []).map((r) => r.documento_id).filter(Boolean))] as string[];
     const metaByKey = new Map<string, { regra_id?: string; justificativa?: string }>();
@@ -1867,18 +1877,13 @@ export const savePresetPermissoes = createServerFn({ method: "POST" })
 export const listPlanoContas = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const pageSize = 1000;
-    const all: { codigo: string; descricao: string | null; tipo: string | null; ativo: boolean | null; sci_apelido: string | null }[] = [];
-    for (let offset = 0; ; offset += pageSize) {
-      const { data, error } = await context.supabase
+    const all = await paginarTodas<{ codigo: string; descricao: string | null; tipo: string | null; ativo: boolean | null; sci_apelido: string | null }>((offset, pageSize) =>
+      context.supabase
         .from("plano_contas")
         .select("codigo, descricao, tipo, ativo, sci_apelido")
         .order("codigo")
-        .range(offset, offset + pageSize - 1);
-      if (error) throw new Error(error.message);
-      all.push(...(data ?? []));
-      if (!data || data.length < pageSize) break;
-    }
+        .range(offset, offset + pageSize - 1),
+    );
     return all.slice().sort((a, b) => (parseInt(a.codigo, 10) || 0) - (parseInt(b.codigo, 10) || 0));
   });
 
@@ -1888,19 +1893,13 @@ export const listPlanoContas = createServerFn({ method: "GET" })
 export const listHistoricosSci = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async ({ context }) => {
-    const pageSize = 1000;
-    const all: { codigo: number; nome: string; apelido: string | null; pula_complemento: boolean }[] = [];
-    for (let offset = 0; ; offset += pageSize) {
-      const { data, error } = await context.supabase
+    return paginarTodas<{ codigo: number; nome: string; apelido: string | null; pula_complemento: boolean }>((offset, pageSize) =>
+      context.supabase
         .from("historicos_sci_lcr")
         .select("codigo, nome, apelido, pula_complemento")
         .order("codigo")
-        .range(offset, offset + pageSize - 1);
-      if (error) throw new Error(error.message);
-      all.push(...((data ?? []) as typeof all));
-      if (!data || data.length < pageSize) break;
-    }
-    return all;
+        .range(offset, offset + pageSize - 1),
+    );
   });
 
 // ====================================================================

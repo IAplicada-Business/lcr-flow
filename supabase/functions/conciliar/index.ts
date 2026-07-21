@@ -15,6 +15,7 @@ import { createClient } from "jsr:@supabase/supabase-js@2";
 import { detectarFaltantes, sinalPorNatureza, validarSaldo, type LancamentoConc, type LinhaExtrato } from "./saldo.ts";
 import { avaliarTravaAnalisar, avaliarTravaFinalizar, contarRevisaoPendente } from "./travas.ts";
 import { formatoBinarioDetectado, parseCsv, type Linha } from "./parse-csv.ts";
+import { paginarTodas } from "./paginar.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -77,12 +78,17 @@ Deno.serve(async (req) => {
     // (front) e no cálculo de revisaoPendenteAnalisar abaixo — sem isso, qualquer
     // lançamento residual com valor=null (nunca aparece na tela) trava o finalizar
     // pra sempre, já que ele conta como "sem conta" em contarRevisaoPendente.
-    const { data: revRows, error: revErr } = await admin
-      .from("lancamentos")
-      .select("confidence, conta_id")
-      .eq("empresa_id", conc.empresa_id)
-      .eq("competencia", conc.competencia)
-      .not("valor", "is", null);
+    const { data: revRows, error: revErr } = await paginarTodas<{ confidence: number | null; conta_id: string | null }>(
+      (offset, pageSize) =>
+        admin
+          .from("lancamentos")
+          .select("confidence, conta_id")
+          .eq("empresa_id", conc.empresa_id)
+          .eq("competencia", conc.competencia)
+          .not("valor", "is", null)
+          .order("id", { ascending: true })
+          .range(offset, offset + pageSize - 1),
+    );
     if (revErr) return fail(revErr.message);
     const revisaoPendente = contarRevisaoPendente(
       (revRows ?? []).map((r) => ({ confidence: r.confidence == null ? null : Number(r.confidence), contaId: (r.conta_id as string | null) ?? null })),
@@ -124,13 +130,25 @@ Deno.serve(async (req) => {
 
   // Razão = lançamentos da competência (gerados pela IA), direto do banco.
   // Não há mais upload de "razão SCI": a razão é a tabela de lançamentos da tela.
-  const { data: lancRows, error: lErr } = await admin
-    .from("lancamentos")
-    .select("id, data_lancamento, valor, descricao, conta_id, fonte_extrato, confidence, natureza_movimento")
-    .eq("empresa_id", conc.empresa_id)
-    .eq("competencia", conc.competencia)
-    .not("valor", "is", null)
-    .range(0, 4999);
+  const { data: lancRows, error: lErr } = await paginarTodas<{
+    id: string;
+    data_lancamento: string | null;
+    valor: number | null;
+    descricao: string | null;
+    conta_id: string | null;
+    fonte_extrato: boolean | null;
+    confidence: number | null;
+    natureza_movimento: string | null;
+  }>((offset, pageSize) =>
+    admin
+      .from("lancamentos")
+      .select("id, data_lancamento, valor, descricao, conta_id, fonte_extrato, confidence, natureza_movimento")
+      .eq("empresa_id", conc.empresa_id)
+      .eq("competencia", conc.competencia)
+      .not("valor", "is", null)
+      .order("id", { ascending: true })
+      .range(offset, offset + pageSize - 1)
+  );
   if (lErr) return fail(lErr.message);
 
   // Trava 1 (#133): espelha podeAnalisar do front — revisão zerada + extrato

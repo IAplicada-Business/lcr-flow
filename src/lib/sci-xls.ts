@@ -47,6 +47,45 @@ export function bancoCodigoDe(bancoNome: string | null | undefined): number | nu
   return null;
 }
 
+/** Nome de banco "placeholder" — a IA não conseguiu identificar o banco no
+ *  documento original (ex. "Não identificado", "Desconhecido", "N/A"). */
+export function ehBancoPlaceholder(banco: string | null | undefined): boolean {
+  const t = semAcento((banco ?? "").trim().toLowerCase());
+  if (!t || t === "n/a") return true;
+  return ["identificado", "especificado", "desconhecido", "informado"].some((p) => t.includes(p));
+}
+
+/** Escolhe a conta bancária "mais confiável" entre as cadastradas da empresa.
+ *  Bug 21/07: o código sempre usava contas_bancarias[0] (a mais ANTIGA
+ *  cadastrada) — se o primeiro documento processado falhou em identificar o
+ *  banco (ex. "Não identificado"), a Planilha SCI ficava com o código do
+ *  banco em branco pra sempre, mesmo com documentos posteriores tendo
+ *  identificado o banco real corretamente (achado no cliente Cultive:
+ *  1º registro "Não identificado", 2º "Banco Inter", mas o export usava o 1º).
+ *  Agora prioriza o registro mais recente que NÃO seja placeholder; se todos
+ *  forem placeholder, cai no comportamento anterior (mais recente mesmo assim,
+ *  o que já é mais seguro do que fixar sempre no primeiro).
+ *
+ *  Fix (code review 20/07): o tie-break usava `reduce` percorrendo a ordem em
+ *  que o array chegou, que não é determinística sem `created_at` (ou com
+ *  `created_at` igual) — a ordem de retorno do Postgres sem `ORDER BY`
+ *  explícito não é garantida. Agora ordena por (created_at, id) antes de
+ *  escolher, então o resultado não depende mais da ordem de chegada. */
+export function melhorContaBancaria<T extends { banco: string | null; created_at?: string | null; id?: string | number }>(
+  contas: readonly T[],
+): T | null {
+  if (contas.length === 0) return null;
+  const validas = contas.filter((c) => !ehBancoPlaceholder(c.banco));
+  const candidatas = validas.length > 0 ? validas : contas;
+  const ordenadas = [...candidatas].sort((a, b) => {
+    const dA = a.created_at ?? "";
+    const dB = b.created_at ?? "";
+    if (dA !== dB) return dA < dB ? -1 : 1;
+    return String(a.id ?? "").localeCompare(String(b.id ?? ""));
+  });
+  return ordenadas[ordenadas.length - 1] ?? null;
+}
+
 export function ladoConta(tipo: string | null): "debito" | "credito" {
   const t = (tipo ?? "").toLowerCase();
   if (TIPOS_DEBITO.some((x) => t.includes(x))) return "debito";

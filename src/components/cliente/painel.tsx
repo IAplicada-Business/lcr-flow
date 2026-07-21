@@ -14,7 +14,7 @@ import { StatusPill, variantFor } from "@/components/status-pill";
 import { Markdown } from "@/components/markdown";
 import { listDocumentos, gerarPlanilhaSci, getHistoricoCerebro, listLancamentosConciliacao, getEmpresa, editarLancamento, type SciLinha } from "@/lib/lcr.functions";
 import { avisarPropagacao } from "@/lib/propagacao-toast";
-import { baixarPlanilhaSciXls, bancoCodigoDe, linhasSci, linhasSciPreview, mapaPdcApelidos, validarLancamentosSci, COLUNAS as COLUNAS_SCI, type SciCelula } from "@/lib/sci-xls";
+import { baixarPlanilhaSciXls, bancoCodigoDe, linhasSci, linhasSciPreview, mapaPdcApelidos, melhorContaBancaria, validarLancamentosSci, COLUNAS as COLUNAS_SCI, type SciCelula } from "@/lib/sci-xls";
 import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
 import { documentoComErroProcessamento } from "@/lib/documento-erros";
 import { DocumentoErroHint } from "@/components/documento-erro-hint";
@@ -339,10 +339,13 @@ export function PlanilhaSciTab({ empresaId, empresaNome, competencia }: { empres
   const contasDistintas = new Set(lancs.map((l) => l.conta?.codigo).filter(Boolean)).size;
 
   // Código do banco (contrapartida débito/crédito) a partir da conta bancária da empresa.
+  // #bugfix-cultive: usa a conta mais recente NÃO placeholder (não "primeira cadastrada")
+  // — ver melhorContaBancaria em sci-xls.ts.
   const { data: emp } = useQuery({ queryKey: ["empresa", empresaId], queryFn: () => getEmpresa({ data: { id: empresaId } }) });
-  const contasBanc = (emp as { contas_bancarias?: { banco: string | null }[] } | undefined)?.contas_bancarias ?? [];
-  const bancoCodigo = bancoCodigoDe(contasBanc[0]?.banco ?? null);
-  const bancoNome = contasBanc[0]?.banco ?? "";
+  const contasBanc = (emp as { contas_bancarias?: { id?: string; banco: string | null; created_at?: string | null }[] } | undefined)?.contas_bancarias ?? [];
+  const melhorConta = melhorContaBancaria(contasBanc);
+  const bancoCodigo = bancoCodigoDe(melhorConta?.banco ?? null);
+  const bancoNome = melhorConta?.banco ?? "";
   // Plano de Contas oficial LCR (Anexo 1) — códigos reduzidos SCI + validação pré-envio.
   // classificacao/tipo alimentam a resolução #136 (conta T sintética → filha analítica).
   // #bugfix-1170: o PostgREST tem um limite físico de linhas por requisição (db-max-rows,
