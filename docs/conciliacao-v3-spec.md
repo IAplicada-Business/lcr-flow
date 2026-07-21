@@ -264,6 +264,7 @@ futuras **já processadas** — não só em documentos novos:
 | Contas analíticas sem `apelido` | Listar p/ confirmação do cliente + bloquear export | Standby |
 | Backfill ~1.297 lançamentos com `extrato_csv_url` apontando pra binário (não-CSV) | 3 camadas propostas (reparse / CSV sintético via IA / reprocessar) | Backlog — retomar com números corretos |
 | Automação de recebimento/cruzamento pós-fluxo estável (item 3 do CRM) | Descartado (21/07) — cliente avaliou e não faz sentido no momento | Cancelado |
+| Toast do "+ Novo lançamento" (Conciliação bancária) com link "Ver na Razão contábil" | Botão fica na toolbar de "Lançamentos do extrato", mas o lançamento criado não tem `fonte_extrato` → some dessa tabela, só aparece em "Outros lançamentos" (contagem) e na aba Razão contábil. Não é bug (comportamento documentado no próprio diálogo), mas pode confundir — toast de sucesso deveria linkar direto pra Razão contábil | Standby (21/07) |
 
 ### Observabilidade (#137)
 
