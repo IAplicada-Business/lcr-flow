@@ -241,20 +241,52 @@ def _sem_acento(s: str) -> str:
     return unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode("ascii")
 
 
+def _eh_banco_placeholder(banco: str | None) -> bool:
+    """Nome de banco "placeholder" — a IA não conseguiu identificar o banco
+    no documento original (ex. "Não identificado", "Desconhecido", "N/A").
+    Espelha ehBancoPlaceholder (src/lib/sci-xls.ts)."""
+    t = _sem_acento((banco or "").strip().lower())
+    if not t or t == "n/a":
+        return True
+    return any(p in t for p in ("identificado", "especificado", "desconhecido", "informado"))
+
+
+def _melhor_conta_bancaria(contas: list[dict]) -> dict | None:
+    """Escolhe a conta bancária "mais confiável" entre as cadastradas da
+    empresa. Bug 21/07: sempre usava contas_bancarias[0] (a mais ANTIGA
+    cadastrada) — se o primeiro documento processado falhou em identificar o
+    banco (ex. "Não identificado"), a Planilha SCI ficava com o código do
+    banco em branco pra sempre, mesmo com documentos posteriores tendo
+    identificado o banco real corretamente (achado no cliente Cultive: 1º
+    registro "Não identificado", 2º "Banco Inter", mas o export usava o 1º).
+    Espelha melhorContaBancaria (src/lib/sci-xls.ts).
+
+    Fix (code review 20/07): o tie-break por `reduce`/loop dependia da ordem
+    de chegada quando `created_at` empatava (ou faltava nos dois lados) — a
+    ordem de retorno do Postgres sem `ORDER BY` explícito não é garantida.
+    Agora ordena por (created_at, id) antes de escolher, então o resultado
+    não depende mais da ordem de chegada."""
+    if not contas:
+        return None
+    validas = [c for c in contas if not _eh_banco_placeholder(c.get("banco"))]
+    candidatas = validas if validas else contas
+    ordenadas = sorted(candidatas, key=lambda c: (c.get("created_at") or "", str(c.get("id") or "")))
+    return ordenadas[-1] if ordenadas else None
+
+
 def buscar_conta_banco(empresa_id: str) -> int | None:
-    """CC nº 1 — mesma regra do front (contas_bancarias[0]).
+    """CC nº 1 — mesma regra do front (melhorContaBancaria).
     Bug 21/07: faltava normalizar acento — "Itaú" (cadastro real do cliente)
     nunca casava com a chave "itau" do dicionário, deixando o código do banco
     em branco na Planilha SCI mesmo com o nome aparecendo corretamente."""
     contas = sb_get("contas_bancarias", {
-        "select": "banco",
+        "select": "id,banco,created_at",
         "empresa_id": f"eq.{empresa_id}",
-        "order": "created_at.asc",
-        "limit": "1",
     })
-    if not contas:
+    melhor = _melhor_conta_bancaria(contas)
+    if not melhor:
         return None
-    banco = _sem_acento((contas[0].get("banco") or "").lower())
+    banco = _sem_acento((melhor.get("banco") or "").lower())
     for nome, codigo in BANCO_PARA_CODIGO.items():
         if _sem_acento(nome) in banco:
             return codigo
