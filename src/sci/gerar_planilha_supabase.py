@@ -3,7 +3,9 @@ src/sci/gerar_planilha_supabase.py
 Gera a planilha de importação SCI a partir dos lançamentos no Supabase.
 
 Alinhado ao export do front (src/lib/sci-xls.ts):
-  - Contas D/C: plano_de_contas_lcr.apelido (código reduzido, col A PDC)
+  - Contas D/C: plano_de_contas_lcr.codigo (código real — apelido abandonado em
+    21/07, alinhado com a Mariana: era um número de transição de sistema mal
+    usado pelo próprio cliente no passado)
   - Histórico: historicos_sci_lcr.codigo (apelido histórico desconsiderado)
   - Complemento vazio quando pula_complemento = true
   - Lado débito/crédito: natureza_movimento > sinal valor > tipo conta
@@ -131,18 +133,6 @@ def sb_get(tabela: str, params: dict) -> list:
     return r.json()
 
 
-def buscar_pdc_apelidos() -> dict[int, int]:
-    """codigo LCR → código reduzido SCI (plano_de_contas_lcr.apelido)."""
-    rows = sb_get("plano_de_contas_lcr", {"select": "codigo,apelido"})
-    out: dict[int, int] = {}
-    for row in rows:
-        cod = row.get("codigo")
-        ap = row.get("apelido")
-        if cod is not None and ap is not None:
-            out[int(cod)] = int(ap)
-    return out
-
-
 def buscar_pdc_tc() -> list[dict]:
     """codigo/classificacao/tipo do Plano de Contas LCR (Anexo 1), para a
     resolução #136 (conta T sintética ou C consolidada → filha analítica)."""
@@ -194,14 +184,16 @@ def buscar_historicos_pula_complemento() -> set[str]:
     return {str(r["codigo"]) for r in rows if r.get("codigo") is not None}
 
 
-def cod_sci_reduzido(codigo_lcr, apelidos: dict[int, int]):
+def cod_sci_conta(codigo_lcr):
+    """Código SCI da conta (Débito/Crédito): sempre plano_de_contas_lcr.codigo —
+    apelido abandonado em 21/07 (mesmo tratamento que hist_sci_codigo já dava
+    ao Histórico). Espelha codSciConta (src/lib/sci-xls.ts)."""
     if codigo_lcr is None:
         return ""
     try:
-        c = int(codigo_lcr)
+        return int(codigo_lcr)
     except (TypeError, ValueError):
         return codigo_lcr
-    return apelidos.get(c, c)
 
 
 def hist_sci_codigo(codigo) -> int | str:
@@ -360,7 +352,6 @@ def gerar_planilha(
     empresa_nome: str,
     competencia: str,
     conta_banco_codigo: int | None,
-    pdc_apelidos: dict[int, int],
     hist_pula: set[str],
     output_dir: Path,
     pdc_tc: list[dict] | None = None,
@@ -374,7 +365,7 @@ def gerar_planilha(
 
     print(f"  {len(lancamentos)} lancamentos encontrados.")
 
-    sci_banco = cod_sci_reduzido(conta_banco_codigo, pdc_apelidos) if conta_banco_codigo else ""
+    sci_banco = cod_sci_conta(conta_banco_codigo) if conta_banco_codigo else ""
 
     linhas = []
     sem_conta = 0
@@ -402,7 +393,7 @@ def gerar_planilha(
                 continue
             codigo_lcr = codigo_para_export_sci(codigo_lcr, pdc_tc)
 
-        sci_conta = cod_sci_reduzido(codigo_lcr, pdc_apelidos)
+        sci_conta = cod_sci_conta(codigo_lcr)
         cod_hist = str(historico.get("codigo") or "").strip()
         pula = cod_hist in hist_pula
 
@@ -495,10 +486,9 @@ def main():
     print(f"  Competencia: {args.competencia}")
 
     print("\nCarregando Plano de Contas LCR e historicos SCI...")
-    pdc_apelidos = buscar_pdc_apelidos()
     pdc_tc = buscar_pdc_tc()
     hist_pula = buscar_historicos_pula_complemento()
-    print(f"  PDC (codigo → reduzido): {len(pdc_apelidos)} contas")
+    print(f"  PDC (T/C): {len(pdc_tc)} contas")
     print(f"  Historicos pula_complemento: {len(hist_pula)}")
 
     empresa = buscar_empresa(args.empresa)
@@ -507,8 +497,7 @@ def main():
 
     conta_banco = args.banco or buscar_conta_banco(empresa["id"])
     if conta_banco:
-        sci_banco = cod_sci_reduzido(conta_banco, pdc_apelidos)
-        print(f"  Conta bancaria CC#1: codigo LCR {conta_banco} → reduzido SCI {sci_banco}")
+        print(f"  Conta bancaria CC#1: codigo LCR {conta_banco}")
     else:
         print("  Conta bancaria nao identificada automaticamente.")
         print("  Use --banco <codigo> para definir (ex: --banco 657 para Itau).")
@@ -522,7 +511,6 @@ def main():
         empresa_nome=empresa.get("nome_fantasia") or empresa["razao_social"],
         competencia=args.competencia,
         conta_banco_codigo=conta_banco,
-        pdc_apelidos=pdc_apelidos,
         hist_pula=hist_pula,
         output_dir=output_dir,
         pdc_tc=pdc_tc,
