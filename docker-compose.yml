@@ -1,0 +1,54 @@
+version: '3.8'
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: lcr-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_BASIC_AUTH_ACTIVE=true
+      - N8N_BASIC_AUTH_USER=${N8N_USER}
+      - N8N_BASIC_AUTH_PASSWORD=${N8N_PASSWORD}
+      - N8N_HOST=${VPS_IP}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=http://${VPS_IP}:5678/
+      - GENERIC_TIMEZONE=America/Sao_Paulo
+      - TZ=America/Sao_Paulo
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./sessions:/home/node/sessions
+      - ./screenshots:/home/node/screenshots
+      - ./outputs:/home/node/outputs
+      # Permite ao n8n disparar `docker exec lcr-playwright ...` (workflow PROC-001).
+      # A imagem n8n precisa do docker CLI (imagem custom) OU use a Opção B (n8n no host).
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  playwright:
+    build:
+      context: .
+      dockerfile: Dockerfile.playwright
+    container_name: lcr-playwright
+    restart: unless-stopped
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - GESTTA_EMAIL=${GESTTA_EMAIL}
+      - GESTTA_PASSWORD=${GESTTA_PASSWORD}
+      - SCI_EMAIL=${SCI_EMAIL}
+      - SCI_PASSWORD=${SCI_PASSWORD}
+      - LEVELDRIVE_EMAIL=${LEVELDRIVE_EMAIL}
+      - LEVELDRIVE_PASSWORD=${LEVELDRIVE_PASSWORD}
+    volumes:
+      - ./sessions:/app/sessions
+      - ./screenshots:/app/screenshots
+      - ./outputs:/app/outputs
+      - ./src:/app/src
+    ports:
+      - "3000:3000"
+
+volumes:
+  n8n_data:

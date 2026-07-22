@@ -32,7 +32,7 @@ Deno.test("validarSaldo — delta 0.02 não confere", () => {
   assertAlmostEquals(r.delta ?? NaN, -0.02, 1e-9);
 });
 
-Deno.test("validarSaldo — sem saldo inicial/final não confere (trava ativa)", () => {
+Deno.test("validarSaldo — sem saldo inicial/final não confere (aviso; não trava Conciliar)", () => {
   const r = validarSaldo({ saldoInicial: null, saldoFinal: null, extrato: [] });
   assertEquals(r.confere, false);
   assertEquals(r.delta, null);

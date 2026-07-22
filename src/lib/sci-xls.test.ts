@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bancoCodigoDe, compararClassificacao, ehBancoPlaceholder, melhorContaBancaria, profundidadeClassificacao, resolverContaAnalitica, type PdcTC } from "./sci-xls";
+import { bancoCodigoDe, codSciConta, compararClassificacao, ehBancoPlaceholder, linhasSci, linhasSciPreview, melhorContaBancaria, profundidadeClassificacao, resolverContaAnalitica, type PdcTC, type SciLanc, type SciLancRico } from "./sci-xls";
 
 describe("ehBancoPlaceholder", () => {
   it("trata string vazia, null e undefined como placeholder", () => {
@@ -187,5 +187,54 @@ describe("profundidadeClassificacao", () => {
 
   it("conta filha com 5 segmentos tem profundidade 5 (um nível abaixo do pai)", () => {
     expect(profundidadeClassificacao("01.1.1.02.001")).toBe(5);
+  });
+});
+
+describe("codSciConta — apelido abandonado 21/07 (alinhado com a Mariana)", () => {
+  it("devolve o código real como número, sem nenhuma redução/lookup", () => {
+    expect(codSciConta("20")).toBe(20);
+    expect(codSciConta("1170")).toBe(1170);
+  });
+
+  it("código vazio/nulo devolve string vazia", () => {
+    expect(codSciConta(null)).toBe("");
+    expect(codSciConta(undefined)).toBe("");
+  });
+});
+
+describe("linhasSci / linhasSciPreview — nunca usam apelido, e mostram a filha resolvida", () => {
+  const pdcTC: PdcTC[] = [
+    { codigo: 29, classificacao: "01.1.2.07", tipo: "T", nome: "ADIANTAMENTO A SÓCIOS" },
+    { codigo: 20, classificacao: "01.1.2.07.001", tipo: "analitica", nome: "Adiantamento a Sócios" },
+  ];
+
+  it("linhasSci exporta o código real da filha (20), nunca um apelido reduzido", () => {
+    const lancs: SciLanc[] = [{
+      data_lancamento: "2026-04-30", valor: 818.8, descricao: "Pagamento de adiantamento",
+      natureza_movimento: "debito", conta: { codigo: "29", tipo: "ativo" }, historico: { codigo: "3693" },
+    }];
+    const [linha] = linhasSci(lancs, 657, pdcTC);
+    expect(linha["DÉBITO"]).toBe(20);
+    expect(linha["CRÉDITO"]).toBe(657);
+  });
+
+  it("linhasSciPreview mostra o código E o nome da filha resolvida (20 · 'Adiantamento a Sócios'), não da conta-pai T", () => {
+    const lancs: SciLancRico[] = [{
+      data_lancamento: "2026-04-30", valor: 818.8, descricao: "Pagamento de adiantamento",
+      natureza_movimento: "debito", conta: { codigo: "29", descricao: "ADIANTAMENTO A SÓCIOS", tipo: "ativo" },
+      historico: { codigo: "3693", descricao: "adtosoc" },
+    }];
+    const [linha] = linhasSciPreview(lancs, 657, "Banco Itaú", pdcTC);
+    expect(linha.debito).toEqual({ codigo: 20, nome: "Adiantamento a Sócios" });
+  });
+
+  it("conta já analítica (sem T/C) mantém código e nome originais", () => {
+    const lancs: SciLancRico[] = [{
+      data_lancamento: "2026-04-30", valor: 100, descricao: "x",
+      natureza_movimento: "debito", conta: { codigo: "20", descricao: "Adiantamento a Sócios", tipo: "ativo" },
+      historico: { codigo: "3693", descricao: "adtosoc" },
+    }];
+    const [linha] = linhasSciPreview(lancs, 657, "Banco Itaú", pdcTC);
+    expect(linha.debito).toEqual({ codigo: 20, nome: "Adiantamento a Sócios" });
   });
 });

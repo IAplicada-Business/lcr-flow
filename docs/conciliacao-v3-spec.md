@@ -17,7 +17,7 @@
 | Transação faltante | **Ambos:** extrato sem classificação **e** `fonte_extrato` sem linha CSV | ~12:19 |
 | Sem documento suporte | Visibilidade/enriquecimento — **não trava** conciliação | ~15:21–17:31 |
 | Conciliar → SCI | Desbloqueia **Baixar SCI** (botão ainda não implementado) | ~01:07:37 |
-| Contas na planilha | **Código reduzido** (`plano_de_contas_lcr` col A) — **não** apelido legado (col E) | ~28:00–36:08 |
+| Contas na planilha | ~~Código reduzido (`plano_de_contas_lcr` col A)~~ **Correção 21/07:** código real (`plano_de_contas_lcr.codigo`) — **nenhum apelido**, nem col A (`.apelido`) nem col E (`plano_contas.sci_apelido`) | ~28:00–36:08; correção daily 20/07 |
 | Histórico na planilha | **Código** (`historicos_sci_lcr.codigo`, col A da planilha oficial) — col **Apelido desconsiderada** | ~00:56:07 |
 | `pula_complemento` | Respeitar flag na export (complemento vazio quando Sim) | ~00:54:33 |
 | Contas T / C | Só **analítica** aceita lançamento (ex. T 29 → analítica 20) | ~33:23–37:13 |
@@ -150,11 +150,23 @@ estruturalmente inequívoco. Fora isso, a decisão continua sendo da IA.
 ### Export SCI
 
 > **Correção (transcrição ~00:56:07):** coluna HISTÓRICO usa **código** (`historicos_sci_lcr.codigo`). A coluna *Apelido* da planilha de históricos e `historicos_contabeis.sci_apelido` **não entram** no export — eram legado do sistema anterior (como col E do PDC para contas).
+>
+> **Correção 21/07 (daily 20/07 com a Mariana):** a decisão original desta seção
+> dizia pra usar `plano_de_contas_lcr.apelido` (col A PDC, "código reduzido")
+> como o valor correto pras colunas DÉBITO/CRÉDITO. Na daily de 20/07 a Mariana
+> trouxe uma correção do cliente: **esse "código reduzido" também é um apelido
+> de transição de sistema** — o cliente começou a usar esse número num momento
+> de migração e ele **não é o código contábil correto**. Foi a causa raiz de
+> divergências como a da conta 1170 (exportava "859" em vez do código real —
+> achado #136). A partir de agora as colunas DÉBITO/CRÉDITO usam sempre
+> `plano_de_contas_lcr.codigo` (o código real, o mesmo que aparece na Razão
+> Contábil) — nenhum apelido, nem col A nem col E. `codSciConta` (front) e
+> `cod_sci_conta` (VPS) substituem `codSciReduzido`/`cod_sci_reduzido`.
 
 | Coluna | Fonte | Não usar |
 |--------|-------|----------|
-| DÉBITO / CRÉDITO (analítica) | `plano_de_contas_lcr.apelido` (= código reduzido, col A PDC) | `plano_contas.sci_apelido` (col E legado) |
-| DÉBITO / CRÉDITO (banco) | Código reduzido da CC **nº 1** | — |
+| DÉBITO / CRÉDITO (analítica) | `plano_de_contas_lcr.codigo` (código real, igual à Razão Contábil) | `plano_de_contas_lcr.apelido` (col A PDC) **e** `plano_contas.sci_apelido` (col E) — os dois são apelidos abandonados |
+| DÉBITO / CRÉDITO (banco) | Código real da CC **nº 1** (`plano_de_contas_lcr.codigo`) | idem acima |
 | HISTÓRICO | `historicos_sci_lcr.codigo` (col A históricos) | col Apelido / `sci_apelido` |
 | COMPLEMENTO | Vazio se `pula_complemento = true`; senão descrição (≤80 chars) | — |
 
@@ -252,6 +264,7 @@ futuras **já processadas** — não só em documentos novos:
 | Contas analíticas sem `apelido` | Listar p/ confirmação do cliente + bloquear export | Standby |
 | Backfill ~1.297 lançamentos com `extrato_csv_url` apontando pra binário (não-CSV) | 3 camadas propostas (reparse / CSV sintético via IA / reprocessar) | Backlog — retomar com números corretos |
 | Automação de recebimento/cruzamento pós-fluxo estável (item 3 do CRM) | Descartado (21/07) — cliente avaliou e não faz sentido no momento | Cancelado |
+| Toast do "+ Novo lançamento" (Conciliação bancária) com link "Ver na Razão contábil" | Botão fica na toolbar de "Lançamentos do extrato", mas o lançamento criado não tem `fonte_extrato` → some dessa tabela, só aparece em "Outros lançamentos" (contagem) e na aba Razão contábil. Não é bug (comportamento documentado no próprio diálogo), mas pode confundir — toast de sucesso deveria linkar direto pra Razão contábil | Standby (21/07) |
 
 ### Observabilidade (#137)
 
@@ -381,6 +394,7 @@ funções puras de `sci-xls.ts` e nos loops de paginação):
 | `src/lib/logs.functions.test.ts` (vitest) | Node | `calcularTempoRevisaoSci`, `mediaTempoRevisaoSci` (métrica revisão → SCI do #137) |
 | `src/lib/sci-xls.test.ts` (vitest) — ampliado 21/07 | Node | Achados da auditoria de banco: colisão PagSeguro/Inter, bancos novos (Safra/Cora/Mercado Pago/Wise/BS2/Afinz/208), placeholder ampliado |
 | `src/lib/sci-xls.test.ts` (vitest) — persistência 21/07 | Node | `bancoCodigoDe` com mapa de apelidos customizado (tabela `bancos_apelidos_lcr`); critério "alias mais longo vence" independente da ordem de iteração |
+| `src/lib/sci-xls.test.ts` (vitest) — abandono do apelido nas contas 21/07 | Node | `codSciConta` (código real, sem lookup); `linhasSci`/`linhasSciPreview` exportando o código real da filha resolvida (20, não um apelido reduzido) com o nome correto |
 
 Rodar: `npm run test` (front) e `deno test supabase/functions/` (edge, requer
 `deno` instalado — `npx -y deno@latest test ...` funciona sem instalação global).
@@ -391,7 +405,7 @@ Rodar: `npm run test` (front) e `deno test supabase/functions/` (edge, requer
 
 - Saldo: delta 0,01 OK; 0,02 bloqueia.
 - Extrato jun/26 não inclui lançamentos 01/jul (~01:21:40).
-- Export: conta 20 no razão = 20 na planilha (não 12700 apelido legado).
+- Export: conta 20 no razão = 20 na planilha (não um apelido reduzido tipo 12201/12700 — nem col A `plano_de_contas_lcr.apelido`, nem col E `plano_contas.sci_apelido`; correção 21/07).
 - Histórico: coluna HISTÓRICO = código SCI (não apelido histórico).
 - Tarifa bancária com `pula_complemento`: COMPLEMENTO vazio.
 - Editar jan/26 → reflete fev–jun/26 processados; dez/25 intacto.

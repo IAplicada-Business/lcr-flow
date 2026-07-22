@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Mapeamento — Integração e Conciliação Bancária de Clientes</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif; color: #1f2937; max-width: 960px; margin: 0 auto; padding: 32px 24px; line-height: 1.5; }
+  header { border-bottom: 2px solid #AFC040; padding-bottom: 16px; margin-bottom: 24px; }
+  header h1 { margin: 0 0 4px; font-size: 22px; }
+  header .meta { color: #6b7280; font-size: 13px; }
+  .block { margin-bottom: 32px; }
+  .block h2 { font-size: 16px; text-transform: uppercase; letter-spacing: .04em; padding-bottom: 6px; border-bottom: 1px solid #e5e7eb; }
+  .block-entrada h2 { color: #4A9FE0; }
+  .block-rotina h2 { color: #E8A43C; }
+  .block-saida h2 { color: #AFC040; }
+  .count { color: #9ca3af; font-weight: 400; }
+  .item { border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; margin-top: 12px; background: #fafafa; }
+  .item h3 { margin: 0 0 8px; font-size: 15px; }
+  .field { font-size: 13.5px; margin: 3px 0; }
+  .field-label { font-weight: 600; color: #374151; }
+  .empty { color: #9ca3af; font-style: italic; font-size: 13px; }
+  .media { margin-top: 10px; }
+  .media-title { font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: #6b7280; margin-bottom: 6px; }
+  .images { display: flex; flex-wrap: wrap; gap: 12px; }
+  figure { margin: 0; max-width: 280px; }
+  figure img { width: 100%; border-radius: 8px; border: 1px solid #e5e7eb; }
+  figcaption { font-size: 12px; color: #6b7280; margin-top: 4px; }
+  .links { margin: 0; padding-left: 18px; font-size: 13.5px; }
+  @media print { body { padding: 0; } .item { break-inside: avoid; } figure { break-inside: avoid; } }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Mapeamento de Processo — Integração e Conciliação Bancária de Clientes</h1>
+    <div class="meta">
+      Código: PROC-001 · 
+      Área: Contábil · 
+      Exportado em 25/06/2026 às 15:40
+    </div>
+  </header>
+  <section class="block block-entrada">
+          <h2>Entrada <span class="count">(2)</span></h2>
+          <div class="item">
+                    <h3>E-mail de solicitação de documentos via Gestta</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> O Sistema Gestta dispara um e-mail no 1ºdia útil do mês solicitando os documentos, é sugerido o prazo de 3 dias úteis para envio. </div><div class="field"><span class="field-label">Origem:</span> Gestta</div><div class="field"><span class="field-label">Formato:</span> E-mail disparado pela plataforma.</div>
+                    <div class="media">
+                          <div class="media-title">Imagens (1)</div>
+                          <div class="images">
+                            <figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780497139490-3zo1jg.png" alt="Exemplo E-mail recepcionado pelo cliente" loading="lazy" />
+                                  <figcaption>Exemplo E-mail recepcionado pelo cliente</figcaption>
+                                </figure>
+                          </div>
+                        </div>
+                    
+                  </div><div class="item">
+                    <h3>Disponibilização dos Documentos Para Contabilização</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> Cliente recepciona o e-mail com o link para adição da documentação. existe um campo para cada tipo de documento, sendo eles: Extratos da conta e aplicações, Planilhas financeiras, Fat. de Cartão de credito, NFs, movimento contábil, este ultimo quando adicionado possui notas fiscais, faturas, boletos e outros documentos diversos que o cliente julga ser relevante. </div><div class="field"><span class="field-label">Formato:</span> Diversos: Geralmente Arquivos em Excel e PDF</div>
+                    <div class="media">
+                          <div class="media-title">Imagens (1)</div>
+                          <div class="images">
+                            <figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780497198699-289pdhn.png" alt="Tela para upload dos documentos. " loading="lazy" />
+                                  <figcaption>Tela para upload dos documentos. </figcaption>
+                                </figure>
+                          </div>
+                        </div>
+                    
+                  </div>
+        </section><section class="block block-rotina">
+          <h2>Rotina <span class="count">(8)</span></h2>
+          <div class="item">
+                    <h3>Etapa 1: Notificação de recebimento dos documentos via Dashboard do Gestta</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> Assim que o cliente envia a documentação, o Gestta notifica na tela de Dashboard indicando o recebimento, fica categorizado como : &quot;Abertas e com cobrança&quot;, conforme imagem disponível nesse item. Em seguida o colaborador analisa se os dados compartilhados são suficientes. Essa análise é realizada através de uma tarefa denominada: &quot;COBRANÇA DE MOVIMENTO MENSAL&quot;. Existe um mapeamento salvo no Gestta que demonstra quais documentos cada cliente precisa disponibilizar. </div><div class="field"><span class="field-label">Responsável:</span> Assitente/Analista</div><div class="field"><span class="field-label">Ferramentas/Sistemas:</span> Sistema gestta</div>
+                    <div class="media">
+                          <div class="media-title">Imagens (1)</div>
+                          <div class="images">
+                            <figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780510117852-hpr0ak.png" alt="Informação sobre a disponibilização dos documentos " loading="lazy" />
+                                  <figcaption>Informação sobre a disponibilização dos documentos </figcaption>
+                                </figure>
+                          </div>
+                        </div>
+                    
+                  </div><div class="item">
+                    <h3>Etapa 2: Análise da suficiência dos documentos recebidos pelo colaborador</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> Em seguida o colaborador analisa se os dados compartilhados são suficientes. Essa análise é realizada através de uma tarefa no sistema gestta denominada: &quot;COBRANÇA DE MOVIMENTO MENSAL&quot;. Existe um mapeamento salvo no Gestta que demonstra quais documentos cada cliente precisa disponibilizar. </div><div class="field"><span class="field-label">Responsável:</span> Assistente ou analista</div><div class="field"><span class="field-label">Ferramentas/Sistemas:</span> Sistema gestta</div><div class="field"><span class="field-label">Tempo estimado:</span> variavel de acordo com o porte da empresa</div>
+                    <div class="media">
+                          <div class="media-title">Imagens (1)</div>
+                          <div class="images">
+                            <figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780510192573-qjo9mh.png" alt="Campo para consulta de quais documentos devem ser disponibilizados para a contabilização" loading="lazy" />
+                                  <figcaption>Campo para consulta de quais documentos devem ser disponibilizados para a contabilização</figcaption>
+                                </figure>
+                          </div>
+                        </div>
+                    
+                  </div><div class="item">
+                    <h3>Etapa 3: Conclusão da Análise e tarefa de Cobrança de Movimento Mensal</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> O Colaborador da LCR segue com a validação se a documentação é suficiente para a contabilização, em caso positivo a tarefa &quot;COBRANÇA DE MOVIMENTO MENSAL&quot; é concluída. Em seguida 2 tarefas são abertas: LANÇAMENTOS CONTÁBEIS e CONCILIAÇÃO E BALANCETE.</div><div class="field"><span class="field-label">Responsável:</span> Assistente ou analista</div><div class="field"><span class="field-label">Ferramentas/Sistemas:</span> Sistema gestta</div><div class="field"><span class="field-label">Tempo estimado:</span> variavel de acordo com o porte da empresa</div>
+                    <div class="media">
+                          <div class="media-title">Imagens (1)</div>
+                          <div class="images">
+                            <figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780511818689-zs1tfr.png" alt="conclusão da tarefa de cobrança" loading="lazy" />
+                                  <figcaption>conclusão da tarefa de cobrança</figcaption>
+                                </figure>
+                          </div>
+                        </div>
+                    
+                  </div><div class="item">
+                    <h3>Etapa 4: Elaboração Planilha de importação de lançamentos</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> Colaborador utiliza planilha padrão do SCI Único para importar dados do extratos, faturas e demais documentos, preenchendo cada transação conforme o plano de contas e plano de históricos, disponíveis no Sistema SCI Unico em Planos &gt; Contas Contábeis e Históricos Contábeis. O Modelo de importação dos lançamentos contábeis é preenchido pelo colaborador se baseando nos documentos disponibilizados. Tambem trabalhamos com um modelo que possui um mapeamento das principais transações identificadas nos clientes que possuem menor volume de lançamentos (que são a maioria dos nossos clientes).</div><div class="field"><span class="field-label">Responsável:</span> Assistente ou analista</div><div class="field"><span class="field-label">Tempo estimado:</span> variavel de acordo com o porte da empresa</div>
+                    <div class="media">
+                          <div class="media-title">Imagens (2)</div>
+                          <div class="images">
+                            <figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780512640596-pflyxk.png" alt="modelo da planilha de importação" loading="lazy" />
+                                  <figcaption>modelo da planilha de importação</figcaption>
+                                </figure><figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780512802701-lyi4ci.png" alt="modelo planilha de consulta para preenchimento da planilha de importação" loading="lazy" />
+                                  <figcaption>modelo planilha de consulta para preenchimento da planilha de importação</figcaption>
+                                </figure>
+                          </div>
+                        </div>
+                    
+                  </div><div class="item">
+                    <h3>Etapa 5: Importação da Planilha de Lançamentos Contábeis</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> Quando o preenchimento for concluído, adicionamos no caminho: https://drv2.leveldrive.com.br/ para importar no sistema SCI. Acessamos os sistema SCI através do caminho: https://novalcr.levelcloud.com.br/. Modulo contábil e  caminho: integrações &gt; importações &gt; Lançamentos contábeis via planilha. Seleciona-se a empresa e o período, mantém-se o gerador “1”, escolhe-se o arquivo na pasta indicada e executa-se a importação, apresentará uma tela com a prévia, confirmar no botão “Importar dados” ou tecla F2.  Analisamos os saldos bancários, se estiverem de acordo a tarefa do gestta: &quot;Lançamentos Contábeis&quot; é concluída</div><div class="field"><span class="field-label">Responsável:</span> Assistente ou analista</div><div class="field"><span class="field-label">Ferramentas/Sistemas:</span> Sistema Unico</div><div class="field"><span class="field-label">Tempo estimado:</span> variavel de acordo com o porte da empresa</div>
+                    <div class="media">
+                          <div class="media-title">Imagens (4)</div>
+                          <div class="images">
+                            <figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780512967350-w0k82w.png" alt="acesso a área de importação" loading="lazy" />
+                                  <figcaption>acesso a área de importação</figcaption>
+                                </figure><figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780512975810-id38f.png" alt="Itens selecionados na área de importação" loading="lazy" />
+                                  <figcaption>Itens selecionados na área de importação</figcaption>
+                                </figure><figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780512986644-fp59z.png" alt="prévia das informações a serem importadas" loading="lazy" />
+                                  <figcaption>prévia das informações a serem importadas</figcaption>
+                                </figure><figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780525597882-odtqup.png" alt="adição da planilha de importaçao na nuvem para importação" loading="lazy" />
+                                  <figcaption>adição da planilha de importaçao na nuvem para importação</figcaption>
+                                </figure>
+                          </div>
+                        </div>
+                    
+                  </div><div class="item">
+                    <h3>Etapa 6: Conclusão Tarefas de Lançamentos no sistema Gestta</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> Após a importação, analisamos se os saldos contábeis das contas bancárias estão de acordo com os extratos bancários, se estiverem a tarefa do gestta: &quot;Lançamentos Contábeis&quot; é concluída.</div><div class="field"><span class="field-label">Responsável:</span> Assistente ou analista</div><div class="field"><span class="field-label">Ferramentas/Sistemas:</span> Sistema gestta</div><div class="field"><span class="field-label">Tempo estimado:</span> variavel de acordo com o porte da empresa</div>
+                    <div class="media">
+                          <div class="media-title">Imagens (1)</div>
+                          <div class="images">
+                            <figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780511904356-4nhq1l.png" alt="Conclusão tarefa cobrança" loading="lazy" />
+                                  <figcaption>Conclusão tarefa cobrança</figcaption>
+                                </figure>
+                          </div>
+                        </div>
+                    
+                  </div><div class="item">
+                    <h3>Etapa 7: Abertura da etapa de Conciliações Contábeis</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> Realizamos o processo de conciliação dos demais registros presentes no sistema e elaboramos um relatório externo intitulado composição de contas, com base no relatório razão, este relatório é elaborado no sistema SCI Unico no caminho: Relatórios &gt; razão e livro caixa&gt; selecionar o período, exemplo 01/01/2026 a 31/01/2026 e emitir o relatório em csv. o relatório será usado para alimentar o modelo de conciliação presente na pasta de cada cliente, dentro no nosso SharePoint. </div><div class="field"><span class="field-label">Responsável:</span> Assistente ou analista</div><div class="field"><span class="field-label">Ferramentas/Sistemas:</span> Sistema Unico</div><div class="field"><span class="field-label">Tempo estimado:</span> variavel de acordo com o porte da empresa</div>
+                    <div class="media">
+                          <div class="media-title">Imagens (3)</div>
+                          <div class="images">
+                            <figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780514035940-rw9r4q.png" alt="" loading="lazy" />
+                                  
+                                </figure><figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780514066167-6gpqnd.png" alt="" loading="lazy" />
+                                  
+                                </figure><figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780514076705-c7pi7t.png" alt="" loading="lazy" />
+                                  
+                                </figure>
+                          </div>
+                        </div>
+                    
+                  </div><div class="item">
+                    <h3>Etapa 8: Conclusão da  Conciliação e Balancete</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> Assim que todas as analises forem concluídas emitiremos o balancete do sistema SCI Único através do caminho: Relatórios &gt; Balancete&gt; selecionamos o período desejado, exemplo 01/01/2026 a 31/01/2026, o arquivo será exportado na versão PDF e saldo no https://drv2.leveldrive.com.br/. Dentro do arquivo conciliação será exportado um pdf da pagina do Checklist após todos os itens estarem validados. Acessamos o sistema gestta, na tarefa &quot;Conciliação e Balancete&quot; e adicionamos o balancete e checklist exportados nos passos anteriores, após a adição a tarefa será concluída. </div><div class="field"><span class="field-label">Responsável:</span> Assitente/Analista</div><div class="field"><span class="field-label">Ferramentas/Sistemas:</span> Sistema gestta</div><div class="field"><span class="field-label">Tempo estimado:</span> variavel de acordo com o porte da empresa</div>
+                    <div class="media">
+                          <div class="media-title">Imagens (2)</div>
+                          <div class="images">
+                            <figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780515378204-4b5pdk.png" alt="Fluxo Gestta" loading="lazy" />
+                                  <figcaption>Fluxo Gestta</figcaption>
+                                </figure><figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780515500892-2ftnpe.png" alt="Tela de geração balancete" loading="lazy" />
+                                  <figcaption>Tela de geração balancete</figcaption>
+                                </figure>
+                          </div>
+                        </div>
+                    
+                  </div>
+        </section><section class="block block-saida">
+          <h2>Saída <span class="count">(3)</span></h2>
+          <div class="item">
+                    <h3>Tarefa de Cobrança de Movimento Mensal concluída</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> Após a conclusão dessa tarefa o cliente é notificado que a documentação foi recepcionada através de um e-mail disparado pelo Gestta. </div><div class="field"><span class="field-label">Formato:</span> e-mail</div><div class="field"><span class="field-label">Destinatário:</span> Cliente</div>
+                    <div class="media">
+                          <div class="media-title">Imagens (1)</div>
+                          <div class="images">
+                            <figure>
+                                  <img src="https://vetyhtwmzpthhcqccohf.supabase.co/storage/v1/object/public/process-mapping-images/mapping-sections/1780526516025-eqat8i.png" alt="e-mail de retorno com a confirmaçao da recepção dos documentos. " loading="lazy" />
+                                  <figcaption>e-mail de retorno com a confirmaçao da recepção dos documentos. </figcaption>
+                                </figure>
+                          </div>
+                        </div>
+                    
+                  </div><div class="item">
+                    <h3>Lançamentos contábeis concluidos</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> A inserção dos registros contábeis é finalizada, desse modo todos os dados estão disponíveis para seguir com as demais análises necessárias para a conclusão dos relatórios contábeis. </div><div class="field"><span class="field-label">Formato:</span> Registros Sistemicos</div><div class="field"><span class="field-label">Destinatário:</span> Area Contabil</div>
+                    
+                    
+                  </div><div class="item">
+                    <h3>Conciliação e Balancete finalizados</h3>
+                    <div class="field"><span class="field-label">Descrição:</span> Com as analises concluídas, os relatórios contábeis ficam disponíveis para as empresas que recepcionam periodicamente esses documentos. </div><div class="field"><span class="field-label">Formato:</span> E-mail </div><div class="field"><span class="field-label">Destinatário:</span> Cliente</div>
+                    
+                    
+                  </div>
+        </section>
+</body>
+</html>

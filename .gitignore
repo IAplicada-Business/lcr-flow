@@ -30,23 +30,39 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+Thumbs.db
 
 # Supabase CLI temp (link do projeto local)
 supabase/.temp/
 
-# Segredos locais (arquivo já rastreado no histórico; isto só evita que
-# futuras alterações nele sejam incluídas automaticamente em `git add -A`)
+# Segredos locais
 .env
+*.env.local
 
 # Node portátil local usado sem instalação global
 .tools/
 
 # Artefatos gerados (planilhas exportadas etc.)
 outputs/
+sessions/
+screenshots/
+planilhas/
+profiles/
 
-# Lockfile do npm gerado por acidente — o repo usa bun.lock
+# Python (automação VPS)
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# Lockfile do npm gerado por acidente — o front usa bun.lock
+# (automação na VPS pode gerar package-lock localmente; não commitar)
 package-lock.json
 
-# Dado sensível local (nomes/e-mails de colaboradores) — scripts que o
-# consomem (ex.: scripts/diag_troca_senha.py) têm fallback se ausente
+# Scripts de investigação pontual/descartável (convenção: prefixo "_")
+scripts/_*.py
+scripts/_*.sh
+
+# Dado sensível local (nomes/e-mails de colaboradores)
 config/colaboradores_contabil.csv
