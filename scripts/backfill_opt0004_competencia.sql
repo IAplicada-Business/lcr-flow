@@ -1,0 +1,4 @@
+-- OPT-0004 backfill (aplicado 2026-07-22 em slewrhdxxtqcdsnpxxwo)
+-- Move docs/lancamentos/conciliacoes de 2026-01 → mês real do movimento
+-- quando há evidência forte (lançamentos ≥70% no mês alvo, ou IA/nome).
+-- Ver scripts/backfill_competencia_jan.py (doc) e histórico do agent.
