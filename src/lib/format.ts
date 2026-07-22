@@ -35,15 +35,19 @@ export function ultimasCompetencias(n = 12): string[] {
   return out;
 }
 
-// Converte um "mês do calendário" escolhido pelo usuário (ex: dropdown com
-// meses do ano) em COMPETÊNCIA contábil (AAAA-MM), aplicando a regra:
-// competência = mês do calendário - 1. Ex: selecionou Julho/2026 → 2026-06.
-// Usado por qualquer selector mês/ano que representa o mês do calendário em
-// que o trabalho está sendo feito (não a competência direta).
+// @deprecated OPT-0004 (Bruno 22/07/2026): NÃO usar em seletores de UI.
+// Aplicava competência = calendário - 1 e fazia "Jan/2026" filtrar docs de
+// 12/2025. Preferir competência direta (`YYYY-MM` / `ultimasCompetencias`).
+// Mantido só por compat com callers legados.
 export function calendarioParaCompetencia(ano: number, mes: number): string {
   const d = new Date(ano, mes - 1, 1);
   d.setMonth(d.getMonth() - 1);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+/** Competência direta a partir do mês/ano escolhido no seletor (sem offset -1). */
+export function mesAnoParaCompetencia(ano: number, mes: number): string {
+  return `${ano}-${String(mes).padStart(2, "0")}`;
 }
 
 export function formatCompetencia(c: string): string {

@@ -16,6 +16,7 @@ import { detectarFaltantes, sinalPorNatureza, validarSaldo, type LancamentoConc,
 import { avaliarTravaAnalisar, avaliarTravaFinalizar, contarRevisaoPendente } from "./travas.ts";
 import { formatoBinarioDetectado, parseCsv, type Linha } from "./parse-csv.ts";
 import { paginarTodas } from "./paginar.ts";
+import { extrairSaldosDocumento } from "./extrair-saldo.ts";
 
 const cors = {
   "Access-Control-Allow-Origin": "*",
@@ -25,21 +26,6 @@ const cors = {
 const json = (status: number, body: unknown) =>
   new Response(JSON.stringify(body), { status, headers: { ...cors, "Content-Type": "application/json" } });
 const fail = (error: string) => json(200, { ok: false, error });
-
-// Extrai saldo_inicial/saldo_final dos dados que a IA já parseou em
-// processar-documento (mesma lógica de getConciliacaoDetalhe em lcr.functions.ts).
-function pickNumero(obj: Record<string, unknown> | null | undefined, chaves: string[]): number | null {
-  if (!obj || typeof obj !== "object") return null;
-  for (const k of chaves) {
-    const v = (obj as Record<string, unknown>)[k];
-    if (v == null || v === "") continue;
-    const n = typeof v === "number"
-      ? v
-      : Number(String(v).replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
-    if (!Number.isNaN(n)) return n;
-  }
-  return null;
-}
 
 // ---------------------------------------------------------------------
 Deno.serve(async (req) => {
@@ -69,10 +55,9 @@ Deno.serve(async (req) => {
   if (!conc) return fail("Conciliação não encontrada.");
   if (!conc.extrato_csv_url) return fail("Importe o extrato bancário (CSV) antes de conciliar.");
 
-  // Finalização (#133 — Três travas): revisão zerada + saldo confere +
-  // faltantes = 0 + análise feita. Espelha exatamente podeFinalizar do front
-  // (conciliacao_.$empresaId.tsx) via avaliarTravaFinalizar (travas.ts). O
-  // pareamento D/C (divergencias_count) NÃO trava mais — removido da spec v3.
+  // Finalização: revisão zerada + faltantes = 0 + análise feita.
+  // Saldo NÃO trava (OPT-0005). Espelha podeFinalizar do front via
+  // avaliarTravaFinalizar (travas.ts). Pareamento D/C removido da spec v3.
   if (modo === "finalizar") {
     // #fix-revisao-valor-null: precisa do mesmo filtro usado em listLancamentosConciliacao
     // (front) e no cálculo de revisaoPendenteAnalisar abaixo — sem isso, qualquer
@@ -178,9 +163,9 @@ Deno.serve(async (req) => {
     descricao: (r.descricao as string | null) ?? null,
   }));
 
-  // Saldo inicial/final: extraído pela IA em processar-documento (documentos
-  // tipo=extrato, dados_extraidos). Sem isso, validarSaldo() já retorna
-  // confere=false com motivo explicativo (não derruba a análise).
+  // Saldo inicial/final: chaves estruturadas + fallback na prosa da IA
+  // (OPT-0005 — a IA costuma narrar "Saldo inicial: R$ X" sem preencher o campo).
+  // Sem saldo, validarSaldo() marca confere=false (aviso); NÃO trava Conciliar.
   const { data: extratoDoc } = await admin
     .from("documentos")
     .select("id, classificacao_ia, dados_extraidos")
@@ -190,11 +175,10 @@ Deno.serve(async (req) => {
     .order("recebido_em", { ascending: false })
     .limit(1)
     .maybeSingle();
-  const dadosExtratoDoc = (extratoDoc?.classificacao_ia as Record<string, unknown> | null)?.dados_extraidos
-    ?? extratoDoc?.dados_extraidos
-    ?? null;
-  const saldoInicial = pickNumero(dadosExtratoDoc as Record<string, unknown> | null, ["saldo_inicial", "saldo_inicio", "saldo_anterior", "opening_balance", "balance_start"]);
-  const saldoFinal = pickNumero(dadosExtratoDoc as Record<string, unknown> | null, ["saldo_final", "saldo_atual", "saldo_disponivel", "closing_balance", "balance_end"]);
+  const { inicial: saldoInicial, final: saldoFinal } = extrairSaldosDocumento(
+    extratoDoc?.dados_extraidos,
+    extratoDoc?.classificacao_ia,
+  );
 
   // extratoFonte: de onde vêm as linhas do extrato pro motor de saldo/
   // faltantes. "csv" = arquivo de texto (checagem independente da IA).
