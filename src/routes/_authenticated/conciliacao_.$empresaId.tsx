@@ -406,10 +406,8 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
       toast.error("Analise as divergências antes de conciliar.");
       return false;
     }
-    if (!saldoConfere) {
-      toast.error(resultado.saldo?.motivo ?? "Saldo não confere. Verifique o extrato antes de conciliar.");
-      scrollParaDivergencias();
-      return false;
+    if (!saldoConfere && resultado.saldo?.motivo) {
+      toast.warning(resultado.saldo.motivo);
     }
     if (faltantesCount > 0) {
       toast.error(`Existem ${faltantesCount} transação(ões) faltante(s). Resolva antes de conciliar.`);
@@ -529,7 +527,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
   // zerada + extrato presente; Conciliar exige revisão zerada + saldo confere +
   // faltantes = 0 + análise feita. Pareamento D/C removido em #132 (não trava).
   const podeAnalisar = temExtrato && aRever === 0 && !busy;
-  const podeFinalizar = temExtrato && aRever === 0 && !!resultado && saldoConfere && faltantesCount === 0 && !busy;
+  const podeFinalizar = temExtrato && aRever === 0 && !!resultado && faltantesCount === 0 && !busy;
 
   return (
     <>
@@ -635,8 +633,8 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
             title={
               aRever > 0 ? `${aRever} lançamento(s) pendentes de revisão`
                 : !resultado ? "Analise as divergências primeiro"
-                : !saldoConfere ? (resultado.saldo?.motivo ?? "Saldo não confere")
                 : faltantesCount > 0 ? `${faltantesCount} transação(ões) faltante(s) pendente(s)`
+                : !saldoConfere ? `Aviso: ${resultado.saldo?.motivo ?? "saldo não confere"} — você pode conciliar e ajustar na planilha SCI`
                 : "Finalizar conciliação"
             }
           >
@@ -956,7 +954,7 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
             <Card><CardContent className="py-10 text-center space-y-3">
               <p className="text-muted-foreground">
                 {!saldoConfere
-                  ? (resultado.saldo?.motivo ?? "Saldo não confere") + " — resolva na aba Lançamentos e clique em Conciliar."
+                  ? `Aviso: ${resultado.saldo?.motivo ?? "saldo não confere"} — você pode Conciliar e ajustar na planilha SCI.`
                   : faltantesCount > 0
                     ? `${faltantesCount} transação(ões) faltante(s) — resolva na aba Lançamentos e clique em Conciliar.`
                     : "Análise concluída — clique em Conciliar na aba Lançamentos para finalizar."}

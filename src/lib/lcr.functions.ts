@@ -6,6 +6,7 @@ import type { Database } from "@/integrations/supabase/types";
 import { TODAS_CHAVES } from "@/lib/acessos";
 import { paginarTodas } from "@/lib/paginar";
 import { compararClassificacao } from "@/lib/sci-xls";
+import { extrairSaldosDocumento } from "@/lib/saldo-extracao";
 
 async function assertAdmin(supabase: SupabaseClient<Database>, userId: string) {
   const { data } = await supabase.from("usuarios_perfil").select("perfil").eq("user_id", userId).maybeSingle();
@@ -1555,23 +1556,12 @@ export const getConciliacaoDetalhe = createServerFn({ method: "GET" })
     ]);
 
     // Extrai saldos do que a IA já parseou (suporta chaves comuns em PT/EN).
-    function pickNumero(obj: Record<string, unknown> | null | undefined, chaves: string[]): number | null {
-      if (!obj || typeof obj !== "object") return null;
-      for (const k of chaves) {
-        const v = (obj as Record<string, unknown>)[k];
-        if (v == null || v === "") continue;
-        const n = typeof v === "number" ? v : Number(String(v).replace(/[^\d,.-]/g, "").replace(/\.(?=\d{3}(\D|$))/g, "").replace(",", "."));
-        if (!Number.isNaN(n)) return n;
-      }
-      return null;
-    }
     let saldoInicial: number | null = null;
     let saldoFinal: number | null = null;
     if (extratoDoc) {
-      const ci = extratoDoc.classificacao_ia as Record<string, unknown> | null;
-      const dados = (ci?.dados_extraidos ?? extratoDoc.dados_extraidos) as Record<string, unknown> | null;
-      saldoInicial = pickNumero(dados, ["saldo_inicial", "saldo_inicio", "saldo_anterior", "opening_balance", "balance_start"]);
-      saldoFinal = pickNumero(dados, ["saldo_final", "saldo_atual", "saldo_disponivel", "closing_balance", "balance_end"]);
+      const saldos = extrairSaldosDocumento(extratoDoc.dados_extraidos, extratoDoc.classificacao_ia);
+      saldoInicial = saldos.inicial;
+      saldoFinal = saldos.final;
     }
 
     // Lançamentos por origem + soma considerando débito/crédito (não soma cega).
