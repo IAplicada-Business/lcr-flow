@@ -27,6 +27,7 @@ supabase/
 # Secrets
 .env
 *.env.local
+.mcp.json
 
 # Scripts de investigação pontual/descartável (convenção: prefixo "_")
 scripts/_*.py

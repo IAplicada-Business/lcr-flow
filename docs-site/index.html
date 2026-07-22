@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Extração Balancete 2025 — LCR</title>
+  <meta name="description" content="Plano de extração do balancete de fechamento anual 2025 via Gestta — MVP entrega 26/07/2026." />
+  <style>
+    :root {
+      --bg: #fafafa;
+      --card: #fff;
+      --text: #171717;
+      --muted: #525252;
+      --border: #e5e5e5;
+      --accent: #2563eb;
+      --success: #16a34a;
+      --warning: #ca8a04;
+      --danger: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+    }
+    .wrap { max-width: 880px; margin: 0 auto; padding: 2rem 1.25rem 4rem; }
+    header { margin-bottom: 2rem; }
+    h1 { font-size: 1.75rem; font-weight: 700; margin: 0 0 0.5rem; line-height: 1.25; }
+    .meta { color: var(--muted); font-size: 0.9rem; }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 0.75rem;
+      margin: 1.5rem 0;
+    }
+    .stat {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 1rem;
+    }
+    .stat strong { display: block; font-size: 1.35rem; }
+    .stat span { font-size: 0.8rem; color: var(--muted); }
+    .callout {
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin: 1.25rem 0;
+      border: 1px solid var(--border);
+    }
+    .callout-success { background: #f0fdf4; border-color: #bbf7d0; }
+    .callout-info { background: #eff6ff; border-color: #bfdbfe; }
+    h2 { font-size: 1.2rem; margin: 2rem 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.35rem; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.9rem;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 0.75rem 0 1rem;
+    }
+    th, td { padding: 0.6rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+    th { background: #f5f5f5; font-weight: 600; }
+    tr:last-child td { border-bottom: none; }
+    .pill {
+      display: inline-block;
+      padding: 0.15rem 0.5rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .pill-yes { background: #dcfce7; color: var(--success); }
+    .pill-no { background: #f5f5f5; color: var(--muted); }
+    .pill-later { background: #fef9c3; color: #854d0e; }
+    .pill-ok { background: #dcfce7; color: var(--success); }
+    .pill-warn { background: #fef9c3; color: var(--warning); }
+    .pill-bad { background: #fee2e2; color: var(--danger); }
+    ol.steps { padding-left: 1.25rem; }
+    ol.steps li { margin: 0.35rem 0; }
+    .links { margin-top: 1.5rem; font-size: 0.9rem; }
+    .links a { color: var(--accent); }
+    footer { margin-top: 3rem; color: var(--muted); font-size: 0.85rem; }
+    ul.check { list-style: none; padding: 0; }
+    ul.check li { padding: 0.35rem 0; }
+    ul.check li.done::before { content: "✓ "; color: var(--success); font-weight: bold; }
+    ul.check li.pending::before { content: "○ "; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Extração Balancete Fechamento 2025</h1>
+      <p class="meta">Documento para o cliente LCR · Competência Dezembro/2025 · versão 1.1 · 21/07/2026</p>
+    </header>
+
+    <div class="stats">
+      <div class="stat"><strong>26/07</strong><span>Prazo MVP</span></div>
+      <div class="stat"><strong>~700</strong><span>Tarefas Gestta</span></div>
+      <div class="stat"><strong>2</strong><span>Anexos por tarefa</span></div>
+      <div class="stat"><strong>5–7 h</strong><span>Lote completo (robô)</span></div>
+    </div>
+
+    <div class="callout callout-success">
+      <strong>Decisões confirmadas (21/07)</strong><br />
+      Entrega até <strong>26/07/2026</strong> no formato MVP: dados extraídos, balancetes parseados,
+      validação D = C e relatório CSV. Painel visual no sistema fica para fase posterior.
+      Extração em massa: <strong>24/07 às 18h</strong>, com pausa da cobrança mensal (~5–7 h).
+    </div>
+
+    <div class="callout callout-info">
+      <strong>Objetivo</strong><br />
+      Automatizar a extração dos balancetes de fechamento anual 2025 a partir do Gestta e integrá-los
+      ao LCR — com validação D = C, PDF de conciliações arquivado e relatório de cobertura.
+    </div>
+
+    <h2>Fonte dos dados</h2>
+    <table>
+      <tr><th>Campo</th><th>Valor</th></tr>
+      <tr><td>Sistema</td><td>Gestta (extração automática via API)</td></tr>
+      <tr><td>Tipo de tarefa</td><td>Demonstrativos do Fechamento Anual</td></tr>
+      <tr><td>Período</td><td>01/12/2025 – 31/12/2025</td></tr>
+      <tr><td>Referência</td><td>Competência (não Data Meta)</td></tr>
+      <tr><td>Volume</td><td>~700 tarefas (barra superior)</td></tr>
+    </table>
+    <p class="meta">Painel lateral Gestta (~40) é subset. Automação cobre todas as ~700.</p>
+
+    <h2>Documentos na automação</h2>
+    <table>
+      <tr><th>Documento</th><th>Extrair?</th><th>Tratamento</th></tr>
+      <tr><td><strong>BALANCETE</strong></td><td><span class="pill pill-yes">Sim</span></td><td>Ler → contas/saldos → validar D = C</td></tr>
+      <tr><td><strong>CONCILIAÇÕES</strong></td><td><span class="pill pill-yes">Sim</span></td><td>Guardar PDF (consulta manual)</td></tr>
+      <tr><td>Balanço, DRE, Carta, Checklist</td><td><span class="pill pill-no">Não</span></td><td>Ignorados nesta fase</td></tr>
+    </table>
+
+    <h2>Cronograma até 26/07</h2>
+    <table>
+      <tr><th>Data</th><th>Atividade</th><th>Marco</th></tr>
+      <tr><td>21/07</td><td>Calibração Gestta + amostra MASCA</td><td>G1 18h: ≥650 taskIds</td></tr>
+      <tr><td>22/07</td><td>Smoke 2 clientes</td><td>G2 18h: end-to-end OK</td></tr>
+      <tr><td>23/07</td><td>Lote seco 20 tarefas</td><td>G3 18h: GO drain</td></tr>
+      <tr><td>24/07 18h</td><td>Pausar cobrança → extração ~700</td><td>Drain 5–7 h</td></tr>
+      <tr><td>25/07</td><td>Concluir drain + CSV</td><td>G4 08h: ≥85%</td></tr>
+      <tr><td>26/07</td><td>Entrega MVP</td><td>Relatório cliente</td></tr>
+    </table>
+
+    <h2>O que entrega em 26/07</h2>
+    <table>
+      <tr><th>Item</th><th>Incluído?</th></tr>
+      <tr><td>~700 tarefas (BALANCETE + CONCILIAÇÕES)</td><td><span class="pill pill-yes">Sim</span></td></tr>
+      <tr><td>Balancetes + validação D = C</td><td><span class="pill pill-yes">Sim</span></td></tr>
+      <tr><td>Relatório CSV de cobertura</td><td><span class="pill pill-yes">Sim</span></td></tr>
+      <tr><td>PDF conciliações arquivado</td><td><span class="pill pill-yes">Sim</span></td></tr>
+      <tr><td>Painel Fechamento 2025</td><td><span class="pill pill-later">Pós-26/07</span></td></tr>
+    </table>
+
+    <h2>Fluxo</h2>
+    <ol class="steps">
+      <li>Listar ~700 tarefas no Gestta</li>
+      <li>Baixar BALANCETE + CONCILIAÇÕES</li>
+      <li>Identificar cliente no LCR</li>
+      <li>Armazenar na nuvem</li>
+      <li>Ler balancete → tabela estruturada</li>
+      <li>Validar D = C</li>
+      <li>Relatório CSV de cobertura</li>
+    </ol>
+
+    <h2>Resultados possíveis</h2>
+    <table>
+      <tr><th>Situação</th><th>Status</th><th>Ação</th></tr>
+      <tr><td>Balancete OK + D = C</td><td><span class="pill pill-ok">OK</span></td><td>Concluído</td></tr>
+      <tr><td>Balancete OK, conciliações ausentes</td><td><span class="pill pill-warn">Parcial</span></td><td>Revisar Gestta</td></tr>
+      <tr><td>Balancete ausente</td><td><span class="pill pill-bad">Incompleto</span></td><td>Tratar manualmente</td></tr>
+      <tr><td>Sem cadastro LCR</td><td><span class="pill pill-bad">Sem cadastro</span></td><td>Vínculo manual</td></tr>
+    </table>
+
+    <h2>Operação do lote (24/07)</h2>
+    <ul>
+      <li>Início: <strong>24/07 às 18h</strong></li>
+      <li>Pausa temporária da cobrança mensal automática</li>
+      <li>Lotes de 10 clientes · duração ~5–7 h</li>
+    </ul>
+
+    <h2>Status do projeto</h2>
+    <ul class="check">
+      <li class="done">Escopo MVP aprovado (~700; BALANCETE + CONCILIAÇÕES)</li>
+      <li class="done">Janela drain acordada (24/07 18h)</li>
+      <li class="pending">Fase 0 — calibração Gestta (em andamento)</li>
+      <li class="pending">Entrega 26/07 — relatório CSV + base importada</li>
+    </ul>
+
+    <div class="links">
+      <p><strong>Versão interativa (canvas):</strong>
+        <a href="https://cursor.com/dashboard/shared-canvases?shareId=canvas-EvdWoQObD-SOdz_Q7joL3p01" target="_blank" rel="noopener">Abrir no Cursor</a>
+      </p>
+    </div>
+
+    <footer>LCR automação · Plano Gestta → LCR · MVP 26/07/2026</footer>
+  </div>
+</body>
+</html>

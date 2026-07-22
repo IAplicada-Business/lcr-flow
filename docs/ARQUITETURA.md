@@ -13,7 +13,7 @@
 > | Parsers bancários Itaú/Bradesco/Santander | `extrato_bancario.py` com **auto-detecção de banco** (`detectar_banco`) — hoje cobre mais bancos (Caixa, Inter, XP…), mas até 2026-07-16 tinha `banco="itau"` hardcoded em vários call-sites (corrigido nesta data) |
 > | Um único pipeline de extração | **Dois pipelines paralelos**: (1) Python determinístico (Gestta → parser → CSV real, preferencial) e (2) Edge Function `processar-documento` com IA como **fallback** (`extrato_fallback_edge=True` já é o padrão em produção via cron) quando o parser Python falha |
 > | — | Motor de **conciliação v3** (saldo inicial+movimentação≈final, travas de revisão/saldo/faltantes) rodando como Supabase Edge Function (`conciliar`) — não existia na v1.0, é a evolução do fluxo "SCI importa lançamentos" |
-> | — | **Dois frontends** apontam para o mesmo repo/branch `main` do GitHub (`mmarques30/lcr-flow`): Vercel (ambiente de dev/testes) e **Lovable** (`nexus-lcr-core.lovable.app`, usado de fato pelo cliente) |
+> | — | **Dois frontends** apontam para o mesmo repo/branch `main` do GitHub (`IAplicada-Business/lcr-flow` — transferido de `mmarques30/lcr-flow` em 21/07): Vercel (ambiente de dev/testes) e **Lovable** (`nexus-lcr-core.lovable.app`, usado de fato pelo cliente) |
 >
 > **Regra prática:** antes de assumir qualquer afirmação deste documento como verdade atual, confira o código/infra real (SSH na VPS, `systemctl status`, `crontab -l`, painel do Lovable/Vercel) — não só a documentação. Ver checklist de ambiente em `.cursor/rules/checklist-ambiente-sessao.mdc`.
 

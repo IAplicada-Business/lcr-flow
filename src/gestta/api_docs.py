@@ -232,8 +232,15 @@ def _baixar_arquivo(task_id, doc_id, customer_id, file_id, file_name, jwt, tenta
     return None, "falha", motivo
 
 
-def baixar_documentos(detalhe: dict, destino: str, jwt: str):
+def _norm_slot(nome: str) -> str:
+    import unicodedata
+    return unicodedata.normalize("NFKD", nome or "").encode("ascii", "ignore").decode().upper().strip()
+
+
+def baixar_documentos(detalhe: dict, destino: str, jwt: str, nomes_permitidos: set | None = None):
     """Baixa via REST todos os arquivos de documentos NÃO desconsiderados.
+    nomes_permitidos: se set, só baixa slots cujo name normalizado está no set
+    (ex.: fechamento anual — BALANCETE, CONCILIACOES). COBRANÇA omite o param.
     Cada arquivo: POST (URL S3 assinada) + GET (bytes), com retry em falha de
     download (_baixar_arquivo). Salva os que vieram OK e coleta os que falharam.
     Retorna {"salvos": [caminhos], "vazios": [{arquivo, caminho, motivo}],
@@ -249,6 +256,10 @@ def baixar_documentos(detalhe: dict, destino: str, jwt: str):
 
     for d in _requested_documents(detalhe):
         if d.get("disconsidered"):
+            continue
+        slot = _norm_slot(d.get("name") or "")
+        if nomes_permitidos and slot not in nomes_permitidos:
+            log(f"    PULADO slot: {d.get('name') or '?'}")
             continue
         for f in (d.get("files") or []):
             file_name = f.get("file_name") or f.get("_id") or "arquivo"

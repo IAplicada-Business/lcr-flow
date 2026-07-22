@@ -1,0 +1,13 @@
+{
+  "version": 2,
+  "name": "lcr-extracao-balancete-2025",
+  "cleanUrls": true,
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" }
+      ]
+    }
+  ]
+}

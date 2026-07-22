@@ -17,9 +17,15 @@ Antes de montar um plano ou começar a implementar algo não-trivial, confirme:
    direto). Ao tocar em infra/pipeline, confirme a realidade (SSH, `systemctl
    status`, `crontab -l`, ler o código-fonte) antes de confiar só na doc.
 3. **Qual frontend o cliente usa de fato**: existem dois frontends síncronos com
-   o mesmo `main` do GitHub (`mmarques30/lcr-flow`) — Vercel (dev/teste) e
+   o mesmo `main` do GitHub (`IAplicada-Business/lcr-flow`) — Vercel (dev/teste) e
    **Lovable** (`nexus-lcr-core.lovable.app`, usado pelo cliente). Ao validar
    uma mudança "para o cliente", teste no Lovable, não só no Vercel.
+   ⚠️ **21/07: o repo foi transferido** de `mmarques30/lcr-flow` para
+   `IAplicada-Business/lcr-flow` — confirme com `git remote -v` que o `origin`
+   aponta pro novo endereço antes de dar push, e verifique com o cliente/admin
+   se as integrações do GitHub App do Vercel e da Lovable (deploy automático a
+   partir do `main`) já foram reconectadas na nova org — não é verificável via
+   `gh api` sem permissão de admin no repo.
 4. **Permissões de admin/deploy**: antes de propor automação de deploy (deploy
    key, GitHub Actions, etc.), confirme se você tem permissão de admin no repo
    — colaborador sem admin não consegue cadastrar deploy keys/secrets.
@@ -32,7 +38,8 @@ Antes de montar um plano ou começar a implementar algo não-trivial, confirme:
    pendentes de revisão (confiança ≥ 80% e conta atribuída). Dados reais de
    cliente quase sempre têm pendências — não assuma que qualquer cliente/mês
    serve para esse teste.
-7. **Múltiplos worktrees**: `D:\IAPLICADA\LCR` e `D:\IAPLICADA\LCR-front` podem
-   ser worktrees do mesmo repositório (`mmarques30/lcr-flow`) em branches
-   diferentes. Confirme com `git remote -v` e `git worktree list` antes de
-   assumir que são repositórios independentes.
+7. **Múltiplos worktrees**: `D:\IAPLICADA\LCR` (branch `automation`) e
+   `D:\IAPLICADA\LCR-front` (branch `main`) são worktrees do mesmo repositório
+   (`IAplicada-Business/lcr-flow`) em branches diferentes. Confirme com
+   `git remote -v` e `git worktree list` antes de assumir que são repositórios
+   independentes.
