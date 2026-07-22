@@ -14,7 +14,7 @@ import { StatusPill, variantFor } from "@/components/status-pill";
 import { Markdown } from "@/components/markdown";
 import { listDocumentos, gerarPlanilhaSci, getHistoricoCerebro, listLancamentosConciliacao, getEmpresa, editarLancamento, type SciLinha } from "@/lib/lcr.functions";
 import { avisarPropagacao } from "@/lib/propagacao-toast";
-import { baixarPlanilhaSciXls, bancoCodigoDe, buscarApelidosBanco, linhasSci, linhasSciPreview, mapaPdcApelidos, melhorContaBancaria, validarLancamentosSci, COLUNAS as COLUNAS_SCI, type SciCelula } from "@/lib/sci-xls";
+import { baixarPlanilhaSciXls, bancoCodigoDe, buscarApelidosBanco, linhasSci, linhasSciPreview, melhorContaBancaria, validarLancamentosSci, COLUNAS as COLUNAS_SCI, type SciCelula } from "@/lib/sci-xls";
 import { DOC_TIPO_LABEL, DOC_STATUS_LABEL, formatCompetencia, competenciaAtual } from "@/lib/format";
 import { documentoComErroProcessamento } from "@/lib/documento-erros";
 import { DocumentoErroHint } from "@/components/documento-erro-hint";
