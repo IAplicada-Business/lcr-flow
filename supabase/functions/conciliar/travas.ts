@@ -3,8 +3,9 @@
 // mesma regra do front (conciliacao_.$empresaId.tsx: podeAnalisar/podeFinalizar).
 //
 // Trava 1 — revisão: todo lançamento precisa de conta + confiança >= 80%.
-// Trava 2 — saldo: saldo_inicial + movimentação ≈ saldo_final (±0.01).
-// Trava 3 — faltantes: extrato sem classificação OU classificado sem extrato.
+// Trava 2 — faltantes: extrato sem classificação OU classificado sem extrato.
+// Saldo (inicial + movimentação ≈ final) é AVISO — NÃO trava Conciliar/SCI
+// (decisão Bruno 22/07/2026 · OPT-0005: ajuste fino fica na planilha ou no SCI).
 // "Sem documento suporte" / docs órfãos NÃO entram aqui — não travam (spec).
 
 export const CONF_MIN_REVISAO = 0.8;
@@ -31,11 +32,13 @@ export function avaliarTravaAnalisar(input: { temExtrato: boolean; revisaoPenden
   return { ok: true };
 }
 
-/** Trava do botão "Conciliar": revisão zerada + saldo confere + faltantes = 0 + análise feita. */
+/** Trava do botão "Conciliar": revisão zerada + faltantes = 0 + análise feita.
+ *  `saldoConfere` / `saldoMotivo` são aceitos por compatibilidade mas NÃO
+ *  bloqueiam (OPT-0005 — saldo vira aviso na UI). */
 export function avaliarTravaFinalizar(input: {
   analisado: boolean;
   revisaoPendente: number;
-  saldoConfere: boolean | null | undefined;
+  saldoConfere?: boolean | null | undefined;
   saldoMotivo?: string | null;
   faltantesCount: number;
 }): TravaResultado {
@@ -43,9 +46,6 @@ export function avaliarTravaFinalizar(input: {
     return { ok: false, motivo: `Existem ${input.revisaoPendente} lançamento(s) pendentes de revisão.` };
   }
   if (!input.analisado) return { ok: false, motivo: "Analise as divergências antes de conciliar." };
-  if (input.saldoConfere !== true) {
-    return { ok: false, motivo: input.saldoMotivo || "Saldo não confere. Verifique o extrato antes de conciliar." };
-  }
   if (input.faltantesCount > 0) {
     return { ok: false, motivo: `Existem ${input.faltantesCount} transação(ões) faltante(s) (extrato sem classificação ou lançamento sem extrato). Resolva antes de conciliar.` };
   }

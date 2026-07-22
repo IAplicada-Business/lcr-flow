@@ -51,10 +51,20 @@ Deno.test("avaliarTravaFinalizar — sem analise bloqueia", () => {
   assertEquals(r.ok, false);
 });
 
-Deno.test("avaliarTravaFinalizar — saldo nao confere bloqueia com motivo", () => {
+Deno.test("avaliarTravaFinalizar — saldo nao confere NAO bloqueia (OPT-0005)", () => {
   const r = avaliarTravaFinalizar({ analisado: true, revisaoPendente: 0, saldoConfere: false, saldoMotivo: "delta 5.00", faltantesCount: 0 });
-  assertEquals(r.ok, false);
-  if (!r.ok) assertEquals(r.motivo, "delta 5.00");
+  assertEquals(r.ok, true);
+});
+
+Deno.test("avaliarTravaFinalizar — saldo nao identificado NAO bloqueia (OPT-0005)", () => {
+  const r = avaliarTravaFinalizar({
+    analisado: true,
+    revisaoPendente: 0,
+    saldoConfere: false,
+    saldoMotivo: "Saldo inicial e/ou final não identificado no extrato.",
+    faltantesCount: 0,
+  });
+  assertEquals(r.ok, true);
 });
 
 Deno.test("avaliarTravaFinalizar — faltantes > 0 bloqueia", () => {

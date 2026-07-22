@@ -406,10 +406,10 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
       toast.error("Analise as divergências antes de conciliar.");
       return false;
     }
-    if (!saldoConfere) {
-      toast.error(resultado.saldo?.motivo ?? "Saldo não confere. Verifique o extrato antes de conciliar.");
-      scrollParaDivergencias();
-      return false;
+    // Saldo é aviso (OPT-0005) — não bloqueia Conciliar/SCI. Se não confere,
+    // só alerta e segue; ajuste fino fica na planilha ou no UNICO SCI.
+    if (!saldoConfere && resultado.saldo?.motivo) {
+      toast.warning(resultado.saldo.motivo);
     }
     if (faltantesCount > 0) {
       toast.error(`Existem ${faltantesCount} transação(ões) faltante(s). Resolva antes de conciliar.`);
@@ -525,11 +525,11 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
     } finally { setActing(false); }
   }
 
-  // Três travas (#133 — docs/conciliacao-v3-spec.md): Analisar exige revisão
-  // zerada + extrato presente; Conciliar exige revisão zerada + saldo confere +
-  // faltantes = 0 + análise feita. Pareamento D/C removido em #132 (não trava).
+  // Travas (#133 + OPT-0005): Analisar exige revisão zerada + extrato;
+  // Conciliar exige revisão zerada + faltantes = 0 + análise feita.
+  // Saldo NÃO trava (Bruno 22/07/2026) — só aviso na UI.
   const podeAnalisar = temExtrato && aRever === 0 && !busy;
-  const podeFinalizar = temExtrato && aRever === 0 && !!resultado && saldoConfere && faltantesCount === 0 && !busy;
+  const podeFinalizar = temExtrato && aRever === 0 && !!resultado && faltantesCount === 0 && !busy;
 
   return (
     <>
@@ -635,8 +635,8 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
             title={
               aRever > 0 ? `${aRever} lançamento(s) pendentes de revisão`
                 : !resultado ? "Analise as divergências primeiro"
-                : !saldoConfere ? (resultado.saldo?.motivo ?? "Saldo não confere")
                 : faltantesCount > 0 ? `${faltantesCount} transação(ões) faltante(s) pendente(s)`
+                : !saldoConfere ? `Conciliar mesmo com aviso de saldo: ${resultado.saldo?.motivo ?? "saldo não confere"}`
                 : "Finalizar conciliação"
             }
           >
@@ -955,10 +955,10 @@ export function ConciliacaoBancaria({ empresaId, competencia }: { empresaId: str
           ) : conc?.status !== "concluida" ? (
             <Card><CardContent className="py-10 text-center space-y-3">
               <p className="text-muted-foreground">
-                {!saldoConfere
-                  ? (resultado.saldo?.motivo ?? "Saldo não confere") + " — resolva na aba Lançamentos e clique em Conciliar."
-                  : faltantesCount > 0
-                    ? `${faltantesCount} transação(ões) faltante(s) — resolva na aba Lançamentos e clique em Conciliar.`
+                {faltantesCount > 0
+                  ? `${faltantesCount} transação(ões) faltante(s) — resolva na aba Lançamentos e clique em Conciliar.`
+                  : !saldoConfere
+                    ? `${resultado.saldo?.motivo ?? "Saldo não confere"} — aviso apenas; você pode Conciliar e ajustar na planilha SCI.`
                     : "Análise concluída — clique em Conciliar na aba Lançamentos para finalizar."}
               </p>
               <Button variant="outline" onClick={() => setSubtab("lancamentos")}>Ir para Lançamentos</Button>

@@ -106,8 +106,14 @@ export async function criarOportunidade(input: {
 }
 
 export async function mudarStatusOportunidade(id: string, novo: OportStatus): Promise<void> {
-  const { error } = await supabase.from("oportunidades").update({ status: novo }).eq("id", id);
+  const { data, error } = await supabase
+    .from("oportunidades")
+    .update({ status: novo })
+    .eq("id", id)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
+  if (!data) throw new Error("Não foi possível atualizar o status (sem permissão ou registro inexistente).");
 }
 
 export async function votarOportunidade(id: string, votar: boolean): Promise<void> {
@@ -115,9 +121,14 @@ export async function votarOportunidade(id: string, votar: boolean): Promise<voi
   const userId = sess.session?.user?.id;
   if (!userId) throw new Error("Sem sessão.");
   if (votar) {
+    // insert puro: evita upsert (que exige UPDATE). Re-voto do mesmo user é no-op via PK.
     const { error } = await supabase.from("oportunidade_votos")
-      .upsert({ oportunidade_id: id, user_id: userId }, { onConflict: "oportunidade_id,user_id" });
-    if (error) throw error;
+      .insert({ oportunidade_id: id, user_id: userId });
+    if (error) {
+      // 23505 = unique_violation — já votou; trata como sucesso.
+      if ((error as { code?: string }).code === "23505") return;
+      throw error;
+    }
   } else {
     const { error } = await supabase.from("oportunidade_votos")
       .delete().eq("oportunidade_id", id).eq("user_id", userId);

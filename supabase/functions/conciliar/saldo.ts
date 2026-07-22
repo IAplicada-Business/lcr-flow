@@ -65,8 +65,8 @@ export type ResultadoSaldo = {
  * |delta| <= 0.01 → confere = true
  *
  * Sem saldo_inicial/saldo_final extraído do extrato, não há como validar —
- * trata como NÃO conferido (trava ativa) até o documento ser reprocessado
- * ou o saldo informado manualmente.
+ * marca confere=false com motivo (aviso na UI). NÃO é trava de Conciliar/SCI
+ * desde OPT-0005 (Bruno 22/07/2026) — ajuste fino fica na planilha ou no SCI.
  */
 export function validarSaldo(args: {
   saldoInicial: number | null;
@@ -86,7 +86,7 @@ export function validarSaldo(args: {
       saldo_calculado: null,
       delta: null,
       confere: false,
-      motivo: "Saldo inicial e/ou final não identificado no extrato. Reprocesse o documento ou informe manualmente.",
+      motivo: "Saldo inicial e/ou final não identificado no extrato. Você pode conciliar mesmo assim e ajustar na planilha SCI se necessário.",
     };
   }
 
